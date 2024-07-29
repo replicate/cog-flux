@@ -1,0 +1,12 @@
+
+.cog
+__pycache__
+wandb
+ft*
+*.ipynb
+output*
+training_out*
+trained_model.tar
+__*.zip
+**-cache
+model_weights

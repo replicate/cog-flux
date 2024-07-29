@@ -84,9 +84,9 @@ configs = {
 }
 
 T5_URL = "https://weights.replicate.delivery/default/official-models/flux/t5/t5-v1_1-xxl.tar"
-T5_CACHE = "./model_weights/t5"
+T5_CACHE = "./model-cache/t5"
 CLIP_URL = "https://weights.replicate.delivery/default/official-models/flux/clip/clip-vit-large-patch14.tar"
-CLIP_CACHE = "./model_weights/clip"
+CLIP_CACHE = "./model-cache/clip"
 
 def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
     if len(missing) > 0 and len(unexpected) > 0:

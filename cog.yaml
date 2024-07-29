@@ -1,0 +1,31 @@
+# Configuration for Cog ⚙️
+# Reference: https://cog.run/yaml
+
+build:
+  # set to true if your model requires a GPU
+  gpu: true
+  cuda: "12.1"
+
+  python_version: "3.11"
+
+  python_packages:
+    - "numpy<2"
+    - "torch==2.2"
+    - "torchvision"
+    - "einops"
+    - "fire >= 0.6.0"
+    - "huggingface-hub"
+    - "safetensors"
+    - "sentencepiece"
+    - "transformers"
+    - "tokenizers"
+    - "protobuf"
+
+  # commands run after the environment is setup
+  run:
+    # - "pip install -e ."
+    - curl -o /usr/local/bin/pget -L "https://github.com/replicate/pget/releases/download/v0.8.2/pget" && chmod +x /usr/local/bin/pget
+
+
+# predict.py defines how predictions are run on your model
+predict: "predict.py:Predictor"
