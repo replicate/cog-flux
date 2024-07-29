@@ -1,0 +1,152 @@
+import os
+from dataclasses import dataclass
+
+import torch
+from safetensors.torch import load_file as load_sft
+
+from flux.model import Flux, FluxParams
+from flux.modules.autoencoder import AutoEncoder, AutoEncoderParams
+from flux.modules.conditioner import HFEmbedder
+from flux.modules.quantize import replace_linear_weight_only_int8_per_channel
+from huggingface_hub import hf_hub_download
+from pathlib import Path
+
+
+@dataclass
+class ModelSpec:
+    params: FluxParams
+    ae_params: AutoEncoderParams
+    ckpt_path: str | None
+    ae_path: str | None
+
+
+configs = {
+    "flux-dev": ModelSpec(
+        ckpt_path=os.getenv("FLUX_DEV"),
+        params=FluxParams(
+            in_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=True,
+        ),
+        ae_path=os.getenv("AE"),
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
+    "flux-schnell": ModelSpec(
+        ckpt_path=os.getenv("FLUX_SCHNELL"),
+        params=FluxParams(
+            in_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=False,
+        ),
+        ae_path=os.getenv("AE"),
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
+}
+
+
+def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
+    if len(missing) > 0 and len(unexpected) > 0:
+        print(f"Got {len(missing)} missing keys:\n\t" + "\n\t".join(missing))
+        print("\n" + "-" * 79 + "\n")
+        print(f"Got {len(unexpected)} unexpected keys:\n\t" + "\n\t".join(unexpected))
+    elif len(missing) > 0:
+        print(f"Got {len(missing)} missing keys:\n\t" + "\n\t".join(missing))
+    elif len(unexpected) > 0:
+        print(f"Got {len(unexpected)} unexpected keys:\n\t" + "\n\t".join(unexpected))
+
+
+def load_flow_model(name: str, device: str | torch.device = "cuda", quantize: bool = False):
+    # Loading Flux
+    print("Init model")
+    ckpt_path = configs[name].ckpt_path
+
+    with torch.device("meta" if ckpt_path is not None else device):
+        model = Flux(configs[name].params).to(torch.bfloat16)
+
+        if quantize:
+            replace_linear_weight_only_int8_per_channel(model)
+
+    if quantize and ckpt_path is not None:
+        ckpt_path = Path(ckpt_path).stem + "_quantized.sft"
+        print(f"Quantized checkpoint path: {ckpt_path}")
+
+    print("Loading checkpoint")
+    # load_sft doesn't support torch.device
+    if ckpt_path is not None:
+        sd = load_sft(ckpt_path, device=str(device))
+        missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
+        print_load_warning(missing, unexpected)
+    return model
+
+
+def load_t5(device: str | torch.device = "cuda", max_length: int = 512) -> HFEmbedder:
+    # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
+    device = torch.device(device)
+    return HFEmbedder("google/t5-v1_1-xxl", max_length=max_length, torch_dtype=torch.bfloat16).to(device)
+
+
+def load_clip(device: str | torch.device = "cuda") -> HFEmbedder:
+    device = torch.device(device)
+    return HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=torch.bfloat16).to(device)
+
+
+def load_ae(name: str, device: str | torch.device = "cuda") -> AutoEncoder:
+    # Loading the autoencoder
+    print("Init AE")
+    with torch.device("meta" if configs[name].ae_path is not None else device):
+        ae = AutoEncoder(configs[name].ae_params)
+
+    if configs[name].ae_path is not None:
+        sd = load_sft(configs[name].ae_path, device=str(device))
+        missing, unexpected = ae.load_state_dict(sd, strict=False, assign=True)
+        print_load_warning(missing, unexpected)
+    return ae
+
+
+def download_ckpt_from_hf(
+    repo_id: str,
+    ckpt_name: str = "flux.safetensors",
+    ae_name: str | None = None,
+    **kwargs,
+) -> tuple[Path, Path | None]:
+    ckpt_path = hf_hub_download(repo_id, ckpt_name, **kwargs)
+    ae_path = hf_hub_download(repo_id, ae_name, **kwargs) if ae_name else None
+    return Path(ckpt_path).resolve(), Path(ae_path).resolve() if ae_path else None
