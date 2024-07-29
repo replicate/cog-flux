@@ -1,5 +1,7 @@
 import os
 from dataclasses import dataclass
+import subprocess
+import time
 
 import torch
 from safetensors.torch import load_file as load_sft
@@ -81,6 +83,10 @@ configs = {
     ),
 }
 
+T5_URL = "https://weights.replicate.delivery/default/official-models/flux/t5/t5-v1_1-xxl.tar"
+T5_CACHE = "./model-cache/t5"
+CLIP_URL = "https://weights.replicate.delivery/default/official-models/flux/clip/clip-vit-large-patch14.tar"
+CLIP_CACHE = "./model-cache/clip"
 
 def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
     if len(missing) > 0 and len(unexpected) > 0:
@@ -119,13 +125,17 @@ def load_flow_model(name: str, device: str | torch.device = "cuda", quantize: bo
 
 def load_t5(device: str | torch.device = "cuda", max_length: int = 512) -> HFEmbedder:
     # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
+    if not os.path.exists(T5_CACHE):
+        download_weights(T5_URL, T5_CACHE)
     device = torch.device(device)
-    return HFEmbedder("google/t5-v1_1-xxl", max_length=max_length, torch_dtype=torch.bfloat16).to(device)
+    return HFEmbedder(T5_CACHE, max_length=max_length, torch_dtype=torch.bfloat16).to(device)
 
 
 def load_clip(device: str | torch.device = "cuda") -> HFEmbedder:
+    if not os.path.exists(CLIP_CACHE):
+        download_weights(CLIP_URL, CLIP_CACHE)
     device = torch.device(device)
-    return HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=torch.bfloat16).to(device)
+    return HFEmbedder(CLIP_CACHE, max_length=77, is_clip=True, torch_dtype=torch.bfloat16).to(device)
 
 
 def load_ae(name: str, device: str | torch.device = "cuda") -> AutoEncoder:
@@ -150,3 +160,11 @@ def download_ckpt_from_hf(
     ckpt_path = hf_hub_download(repo_id, ckpt_name, **kwargs)
     ae_path = hf_hub_download(repo_id, ae_name, **kwargs) if ae_name else None
     return Path(ckpt_path).resolve(), Path(ae_path).resolve() if ae_path else None
+
+
+def download_weights(url: str, dest: str):
+    start = time.time()
+    print("downloading url: ", url)
+    print("downloading to: ", dest)
+    subprocess.check_call(["pget", "-x", url, dest], close_fds=False)
+    print("downloading took: ", time.time() - start)
