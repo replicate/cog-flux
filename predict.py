@@ -1,5 +1,3 @@
-
-
 import os
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 
@@ -18,7 +16,7 @@ class Predictor(BasePredictor):
         # need > 48 GB of ram to store all models in VRAM
         self.offload = "A40" in gpu_name
 
-        self.flow_model_name = os.getenv("FLUX_MODEL", "flux-dev")
+        self.flow_model_name = os.getenv("FLUX_MODEL", "flux-schnell")
 
         device = "cuda" 
         self.t5 = load_t5(device)
@@ -44,6 +42,7 @@ class Predictor(BasePredictor):
         }
         return aspect_ratios.get(aspect_ratio)
 
+    @torch.inference_mode()
     def predict(
         self,
         prompt: str = Input(description="Prompt for generated image"),
@@ -78,25 +77,25 @@ class Predictor(BasePredictor):
         x = get_noise(num_outputs, height, width, device=torch_device, dtype=torch.bfloat16, seed=seed)
 
         if self.offload:
-            ae = ae.cpu()
+            self.ae = self.ae.cpu()
             torch.cuda.empty_cache()
-            t5, clip = t5.to(torch_device), clip.to(torch_device)
+            self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
 
         inp = prepare(self.t5, self.clip, x, prompt=prompt)
         timesteps = get_schedule(self.num_steps, inp["img"].shape[0], shift=self.shift)
 
         if self.offload:
-            t5, clip = t5.cpu(), clip.cpu()
+            self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
             torch.cuda.empty_cache()
-            model = model.to(torch_device)
+            self.flux = self.flux.to(torch_device)
 
         x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
 
         if self.offload:
-            model.cpu()
+            self.flux.cpu()
             torch.cuda.empty_cache()
-            ae.decoder.to(x.device)
-
+            self.ae.decoder.to(x.device)
+        
         x = unpack(x.float(), height, width)
         with torch.autocast(device_type=torch_device, dtype=torch.bfloat16):
             x = self.ae.decode(x)
@@ -104,7 +103,7 @@ class Predictor(BasePredictor):
         # bring into PIL format and save
         x = rearrange(x[0], "c h w -> h w c").clamp(-1, 1)
         img = Image.fromarray((127.5 * (x + 1.0)).cpu().byte().numpy())
-        output_path = f"/tmp/out-0.{output_format}"
+        output_path = f"out-0.{output_format}"
         if output_format != 'png':
             img.save(output_path, quality=output_quality, optimize=True)
         else:
