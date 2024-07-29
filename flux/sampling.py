@@ -110,6 +110,7 @@ def denoise(
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
     for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
         t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
+        print("ts_vec")
         pred = model(
             img=img,
             img_ids=img_ids,
@@ -119,6 +120,7 @@ def denoise(
             timesteps=t_vec,
             guidance=guidance_vec,
         )
+        print("stepped")
 
         img = img + (t_prev - t_curr) * pred
 
