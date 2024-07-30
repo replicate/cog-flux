@@ -82,7 +82,7 @@ class Predictor(BasePredictor):
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
 
         inp = prepare(self.t5, self.clip, x, prompt=prompt)
-        timesteps = get_schedule(self.num_steps, inp["img"].shape[0], shift=self.shift)
+        timesteps = get_schedule(self.num_steps, inp["img"].shape[1], shift=self.shift)
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
