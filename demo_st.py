@@ -120,7 +120,7 @@ def main(
             torch.cuda.empty_cache()
             t5, clip = t5.to(torch_device), clip.to(torch_device)
         inp = prepare(t5=t5, clip=clip, img=x, prompt=opts.prompt)
-        timesteps = get_schedule(opts.num_steps, inp["img"].shape[0], shift=(not is_schnell))
+        timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(not is_schnell))
 
         # offload TEs to CPU, load model to gpu
         if offload:
