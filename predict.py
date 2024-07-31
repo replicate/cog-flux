@@ -19,7 +19,8 @@ class Predictor(BasePredictor):
         self.flow_model_name = os.getenv("FLUX_MODEL", "flux-schnell")
 
         device = "cuda" 
-        self.t5 = load_t5(device)
+        max_length = 256 if self.flow_model_name == "flux-schnell" else 512
+        self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
         self.flux = load_flow_model(self.flow_model_name, device="cpu" if self.offload else device)
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
