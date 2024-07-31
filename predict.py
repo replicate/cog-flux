@@ -53,7 +53,7 @@ class Predictor(BasePredictor):
             choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
             default="1:1",
         ),
-        guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
+        # guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
         # num_outputs: int = Input(description="Number of outputs to generate", default=1, le=4, ge=1),
         seed: int = Input(description="Random seed. Set for reproducible generation", default=None),
         output_format: str = Input(

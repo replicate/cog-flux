@@ -19,12 +19,25 @@ class ModelSpec:
     params: FluxParams
     ae_params: AutoEncoderParams
     ckpt_path: str | None
+    ckpt_url: str | None
     ae_path: str | None
+    ae_url: str | None
 
+T5_URL = "https://weights.replicate.delivery/default/official-models/flux/t5/t5-v1_1-xxl.tar"
+T5_CACHE = "./model-cache/t5"
+CLIP_URL = "https://weights.replicate.delivery/default/official-models/flux/clip/clip-vit-large-patch14.tar"
+CLIP_CACHE = "./model-cache/clip"
+SCHNELL_CACHE = "./model-cache/schnell/schnell.sft"
+SCHNELL_URL = "https://weights.replicate.delivery/default/official-models/flux/schnell/schnell.sft"
+DEV_CACHE = "./model-cache/dev.sft"
+DEV_URL = "tbd"
+AE_CACHE = "./model-cache/ae/ae.sft"
+AE_URL = "https://weights.replicate.delivery/default/official-models/flux/ae/ae.sft"
 
 configs = {
     "flux-dev": ModelSpec(
-        ckpt_path=os.getenv("FLUX_DEV"),
+        ckpt_path=DEV_CACHE,
+        ckpt_url=DEV_URL,
         params=FluxParams(
             in_channels=64,
             vec_in_dim=768,
@@ -39,7 +52,8 @@ configs = {
             qkv_bias=True,
             guidance_embed=True,
         ),
-        ae_path=os.getenv("AE"),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
         ae_params=AutoEncoderParams(
             resolution=256,
             in_channels=3,
@@ -53,7 +67,8 @@ configs = {
         ),
     ),
     "flux-schnell": ModelSpec(
-        ckpt_path=os.getenv("FLUX_SCHNELL"),
+        ckpt_path=SCHNELL_CACHE,
+        ckpt_url=SCHNELL_URL,
         params=FluxParams(
             in_channels=64,
             vec_in_dim=768,
@@ -68,7 +83,8 @@ configs = {
             qkv_bias=True,
             guidance_embed=False,
         ),
-        ae_path=os.getenv("AE"),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
         ae_params=AutoEncoderParams(
             resolution=256,
             in_channels=3,
@@ -83,10 +99,6 @@ configs = {
     ),
 }
 
-T5_URL = "https://weights.replicate.delivery/default/official-models/flux/t5/t5-v1_1-xxl.tar"
-T5_CACHE = "./model-cache/t5"
-CLIP_URL = "https://weights.replicate.delivery/default/official-models/flux/clip/clip-vit-large-patch14.tar"
-CLIP_CACHE = "./model-cache/clip"
 
 def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
     if len(missing) > 0 and len(unexpected) > 0:
@@ -103,6 +115,10 @@ def load_flow_model(name: str, device: str | torch.device = "cuda", quantize: bo
     # Loading Flux
     print("Init model")
     ckpt_path = configs[name].ckpt_path
+    ckpt_url = configs[name].ckpt_url
+
+    if not os.path.exists(ckpt_path):
+        download_weights(ckpt_url, ckpt_path)
 
     with torch.device("meta" if ckpt_path is not None else device):
         model = Flux(configs[name].params).to(torch.bfloat16)
@@ -144,6 +160,11 @@ def load_ae(name: str, device: str | torch.device = "cuda") -> AutoEncoder:
     with torch.device("meta" if configs[name].ae_path is not None else device):
         ae = AutoEncoder(configs[name].ae_params)
 
+    ae_path = configs[name].ae_path
+    ae_url = configs[name].ae_url
+    if not os.path.exists(ae_path):
+        download_weights(ae_url, ae_path)
+
     if configs[name].ae_path is not None:
         sd = load_sft(configs[name].ae_path, device=str(device))
         missing, unexpected = ae.load_state_dict(sd, strict=False, assign=True)
@@ -166,5 +187,8 @@ def download_weights(url: str, dest: str):
     start = time.time()
     print("downloading url: ", url)
     print("downloading to: ", dest)
-    subprocess.check_call(["pget", "-x", url, dest], close_fds=False)
+    if url.endswith("tar"):
+        subprocess.check_call(["pget", "-x", url, dest], close_fds=False)
+    else:
+        subprocess.check_call(["pget", url, dest], close_fds=False)
     print("downloading took: ", time.time() - start)
