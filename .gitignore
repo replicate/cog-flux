@@ -9,4 +9,4 @@ training_out*
 trained_model.tar
 __*.zip
 **-cache
-model_weights
+model-cache
