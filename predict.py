@@ -16,7 +16,7 @@ class Predictor(BasePredictor):
         # need > 48 GB of ram to store all models in VRAM
         self.offload = "A40" in gpu_name
 
-        self.flow_model_name = os.getenv("FLUX_MODEL", "flux-schnell")
+        self.flow_model_name = os.getenv("FLUX_MODEL", "flux-dev")
         print(f"Booting model {self.flow_model_name}")
 
         device = "cuda" 
@@ -53,7 +53,7 @@ class Predictor(BasePredictor):
             choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
             default="1:1",
         ),
-        # guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
+        guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
         # num_outputs: int = Input(description="Number of outputs to generate", default=1, le=4, ge=1),
         seed: int = Input(description="Random seed. Set for reproducible generation", default=None),
         output_format: str = Input(
@@ -90,6 +90,10 @@ class Predictor(BasePredictor):
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
+
+        # handling api mismatch for dev/schnell
+        if "guidance" not in locals():
+            guidance = 3.5
 
         x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
 

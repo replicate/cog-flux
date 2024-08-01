@@ -29,8 +29,8 @@ CLIP_URL = "https://weights.replicate.delivery/default/official-models/flux/clip
 CLIP_CACHE = "./model-cache/clip"
 SCHNELL_CACHE = "./model-cache/schnell/schnell.sft"
 SCHNELL_URL = "https://weights.replicate.delivery/default/official-models/flux/schnell/schnell.sft"
-DEV_CACHE = "./model-cache/dev.sft"
-DEV_URL = "tbd"
+DEV_CACHE = "./model-cache/dev/dev.sft"
+DEV_URL = "https://weights.replicate.delivery/default/official-models/flux/dev/dev.sft"
 AE_CACHE = "./model-cache/ae/ae.sft"
 AE_URL = "https://weights.replicate.delivery/default/official-models/flux/ae/ae.sft"
 
