@@ -1,11 +1,11 @@
 import os
-from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
-
 import torch
-from einops import rearrange
 from PIL import Image
+from einops import rearrange
+from torchvision import transforms
 from cog import BasePredictor, Input, Path, emit_metric
 from flux.util import load_ae, load_clip, load_flow_model, load_t5
+from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 
 
 class Predictor(BasePredictor):
@@ -17,9 +17,12 @@ class Predictor(BasePredictor):
         self.offload = "A40" in gpu_name
 
         self.flow_model_name = os.getenv("FLUX_MODEL", "flux-dev")
+        #make directory model-cache/schnell
+        if self.flow_model_name == "flux-schnell":
+            os.makedirs("model-cache/schnell", exist_ok=True)
         print(f"Booting model {self.flow_model_name}")
 
-        device = "cuda" 
+        device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
@@ -44,6 +47,20 @@ class Predictor(BasePredictor):
         }
         return aspect_ratios.get(aspect_ratio)
 
+    def get_image(self, image: str):
+        if image is None:
+            return None
+        image = Image.open(image).convert("RGB")
+
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: 2.0 * x - 1.0),
+            ]
+        )
+        img: torch.Tensor = transform(image)
+        return img[None, ...]
+
     @torch.inference_mode()
     def predict(
         self,
@@ -53,7 +70,17 @@ class Predictor(BasePredictor):
             choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
             default="1:1",
         ),
+        image: Path = Input(
+            description="Input image for img2img mode(flux-dev only)",
+            default=None,
+        ),
         guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
+        prompt_strength: float = Input(
+            description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            ge=0.0,
+            le=1.0,
+            default=0.8,
+        ),
         # num_outputs: int = Input(description="Number of outputs to generate", default=1, le=4, ge=1),
         seed: int = Input(description="Random seed. Set for reproducible generation", default=None),
         output_format: str = Input(
@@ -72,20 +99,42 @@ class Predictor(BasePredictor):
         torch_device = "cuda"
         num_outputs = 1
         width, height = self.aspect_ratio_to_width_height(aspect_ratio)
+
+        # img2img only works for flux-dev
+        if self.flow_model_name != "flux-dev":
+            init_image = None
+        else:
+            print("Image & flux-dev detected, settting to img2img mode")
+            init_image = self.get_image(image)
         
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
-        
+
+        if init_image is not None:
+            init_image = init_image.to(torch_device)
+            #resize
+            init_image = torch.nn.functional.interpolate(init_image, (height, width))
+            if self.offload:
+                self.ae.encoder.to(torch_device)
+            init_image = self.ae.encode(init_image.to())
+            if self.offload:
+                self.ae = self.ae.cpu()
+                torch.cuda.empty_cache()
+
+        # prepare input
         x = get_noise(num_outputs, height, width, device=torch_device, dtype=torch.bfloat16, seed=seed)
+        timesteps = get_schedule(self.num_steps, x.shape[-1] * x.shape[-2] // (16 * 16), shift=self.shift)
+        if init_image is not None:
+            t_idx = int((1.0 - prompt_strength) * self.num_steps)
+            t = timesteps[t_idx]
+            timesteps = timesteps[t_idx:]
+            x = t * x + (1.0 - t) * init_image.to(x.dtype)
 
         if self.offload:
-            self.ae = self.ae.cpu()
-            torch.cuda.empty_cache()
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
+        inp = prepare(self.t5, self.clip, img=x, prompt=prompt)
 
-        inp = prepare(self.t5, self.clip, x, prompt=prompt)
-        timesteps = get_schedule(self.num_steps, inp["img"].shape[1], shift=self.shift)
-
+        # offload TEs to CPU, load model to gpu
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
             torch.cuda.empty_cache()
@@ -95,16 +144,23 @@ class Predictor(BasePredictor):
         if "guidance" not in locals():
             guidance = 3.5
 
+        # denoise initial noise
         x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
 
+        # offload model, load autoencoder to gpu
         if self.offload:
             self.flux.cpu()
             torch.cuda.empty_cache()
             self.ae.decoder.to(x.device)
         
+        # decode latents to pixel space
         x = unpack(x.float(), height, width)
         with torch.autocast(device_type=torch_device, dtype=torch.bfloat16):
             x = self.ae.decode(x)
+
+        if self.offload:
+            self.ae.decoder.cpu()
+            torch.cuda.empty_cache()
 
         # bring into PIL format and save
         x = rearrange(x[0], "c h w -> h w c").clamp(-1, 1)
@@ -117,4 +173,3 @@ class Predictor(BasePredictor):
 
         emit_metric("num_images", num_outputs)
         return Path(output_path)
-

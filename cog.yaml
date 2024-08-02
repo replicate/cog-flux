@@ -9,17 +9,18 @@ build:
   python_version: "3.11"
 
   python_packages:
-    - "numpy<2"
     - "torch==2.2"
-    - "torchvision==0.17.0"
+    - "torchvision"
     - "einops==0.8.0"
     - "fire >= 0.6.0"
     - "huggingface-hub==0.24.3"
+    - "numpy<2"
     - "safetensors==0.4.3"
     - "sentencepiece==0.2.0"
     - "transformers==4.43.3"
     - "tokenizers==0.19.1"
     - "protobuf==5.27.2"
+    - "pillow"
 
   # commands run after the environment is setup
   run:
