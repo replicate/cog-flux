@@ -14,7 +14,7 @@ from diffusers.pipelines.stable_diffusion.safety_checker import (
 from transformers import CLIPImageProcessor
 
 SAFETY_CACHE = "./safety-cache"
-FEATURE_EXTRACTOR = "./feature-extractor"
+FEATURE_EXTRACTOR = "/src/feature-extractor"
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
 
 class Predictor(BasePredictor):
@@ -136,7 +136,7 @@ class Predictor(BasePredictor):
             if self.offload:
                 self.safety_checker = self.safety_checker.to("cuda")
             _, has_nsfw_content = self.run_safety_checker(img)
-            if has_nsfw_content:
+            if has_nsfw_content[0]:
                 raise Exception(f"NSFW content detected. Try running it again, or try a different prompt.")
 
         output_path = f"out-0.{output_format}"
