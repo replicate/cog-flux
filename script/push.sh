@@ -1,5 +1,19 @@
 #!/bin/bash
 
-cog push r8.im/replicate/flux-schnell-setup
-date +"%Y-%m-%d %H:%M:%S" > the_time.txt
-yolo push -e FLUX_MODEL=FLUX_DEV --base r8.im/replicate/flux-schnell-setup --dest r8.im/replicate/flux-dev-setup the_time.txt
+./script/select.sh "$1"
+if [ $? -ne 0 ]; then
+    echo "Couldn't select a model, double check you're passing a valid name."
+    exit 1
+fi
+
+v=$(cog --version)
+
+# async cog?
+if [[ $v == *"0.10.0"* ]]; then
+    echo "Async cog found, pushing model"
+else
+    echo "Nope! switch to async cog and rebuild"
+    exit -1
+fi
+
+cog push r8.im/replicate-internal/flux-$1-internal-model
