@@ -1,42 +1,16 @@
-# FLUX
+# FLUX (in cog!)
 
-## Introduction
+This is a repository for running flux-dev and flux-schnell within a cog container. 
 
-Flux is a rectified flow transformer.
+## How to use this repo
 
-## Installation
+### Selecting a model
 
-Install via
+run `script/select.sh (dev,schnell)` and that'll create a cog.yaml configured for the appropriate model.
 
-```bash
-python3.10 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[all]'
-```
+### Pushing a model
 
-### Models
+run `script/push.sh (dev,schnell)` to push the model to Replicate. Note that these models are currently configured
+to push to replicate internal repos. 
 
-We are offering three models:
-- `flux-schnell` step-distilled variant (quantized and non-quantized)
-- `flux-dev` guidance-distilled variant (quantized and non-quantized)
-- `flux-pro` the base model, available via API
-
-## Usage
-
-For interactive sampling run
-```bash
-python -m flux --name <name> --loop
-```
-Or to generate a single sample run
-```bash
-python -m flux --name <name> \
-  --height <height> --width <width> \
-  --prompt "<prompt>"
-```
-
-To use the quantized model, add the flag `--quantize_flow` to the above commands.
-
-Run the streamlit demo via
-```bash
-streamlit run demo_st.py
-```
+To push all models, run `script/cog-push-all.sh`

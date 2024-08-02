@@ -10,3 +10,5 @@ trained_model.tar
 __*.zip
 **-cache
 model-cache
+
+cog.yaml

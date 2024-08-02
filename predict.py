@@ -1,4 +1,7 @@
 import os
+from typing import Optional
+
+from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 
 import torch
@@ -17,8 +20,41 @@ SAFETY_CACHE = "./safety-cache"
 FEATURE_EXTRACTOR = "/src/feature-extractor"
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
 
+@dataclass
+class SharedInputs:
+    prompt: Input = Input(description="Prompt for generated image")
+    aspect_ratio: Input = Input(
+            description="Aspect ratio for the generated image",
+            choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
+            default="1:1")
+    seed: Input = Input(description="Random seed. Set for reproducible generation", default=None)
+    output_format: Input = Input(
+            description="Format of the output images",
+            choices=["webp", "jpg", "png"],
+            default="webp",
+        )
+    output_quality: Input = Input(
+            description="Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs",
+            default=80,
+            ge=0,
+            le=100,
+        )
+    disable_safety_checker: Input = Input(
+            description="Disable safety checker for generated images. This feature is only available through the API. See [https://replicate.com/docs/how-does-replicate-work#safety](https://replicate.com/docs/how-does-replicate-work#safety)",
+            default=False,
+    )
+
+SHARED_INPUTS = SharedInputs()
+
+
 class Predictor(BasePredictor):
     def setup(self) -> None:
+        return
+
+    def base_setup(self, flow_model_name) -> None:
+        self.flow_model_name = flow_model_name
+        print(f"Booting model {self.flow_model_name}")
+
         gpu_name = os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits").read().strip()
         print("Detected GPU:", gpu_name)
 
@@ -32,9 +68,6 @@ class Predictor(BasePredictor):
 
         # need > 48 GB of ram to store all models in VRAM
         self.offload = "A40" in gpu_name
-
-        self.flow_model_name = os.getenv("FLUX_MODEL", "flux-schnell")
-        print(f"Booting model {self.flow_model_name}")
 
         device = "cuda" 
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
@@ -60,34 +93,19 @@ class Predictor(BasePredictor):
             "9:21": (640, 1536),
         }
         return aspect_ratios.get(aspect_ratio)
+    
+    def predict():
+        raise Exception("You need to instantiate a predictor for a specific flux model")
 
-    @torch.inference_mode()
-    def predict(
+    def base_predict(
         self,
-        prompt: str = Input(description="Prompt for generated image"),
-        aspect_ratio: str = Input(
-            description="Aspect ratio for the generated image",
-            choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
-            default="1:1",
-        ),
-        # guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
-        # num_outputs: int = Input(description="Number of outputs to generate", default=1, le=4, ge=1),
-        seed: int = Input(description="Random seed. Set for reproducible generation", default=None),
-        output_format: str = Input(
-            description="Format of the output images",
-            choices=["webp", "jpg", "png"],
-            default="webp",
-        ),
-        output_quality: int = Input(
-            description="Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs",
-            default=80,
-            ge=0,
-            le=100,
-        ),
-        disable_safety_checker: bool = Input(
-            description="Disable safety checker for generated images. This feature is only available through the API. See [https://replicate.com/docs/how-does-replicate-work#safety](https://replicate.com/docs/how-does-replicate-work#safety)",
-            default=False,
-        ),
+        prompt: str,
+        aspect_ratio: str,
+        output_format: str,
+        output_quality: int,
+        disable_safety_checker: bool,
+        guidance: float = 3.5, # schnell ignores guidance within the model, fine to have default
+        seed: Optional[int] = None,
     ) -> Path:
         """Run a single prediction on the model"""
         torch_device = "cuda"
@@ -112,10 +130,6 @@ class Predictor(BasePredictor):
             self.safety_checker = self.safety_checker.cpu()
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
-
-        # handling api mismatch for dev/schnell
-        if "guidance" not in locals():
-            guidance = 3.5
 
         x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
 
@@ -158,3 +172,40 @@ class Predictor(BasePredictor):
             clip_input=safety_checker_input.pixel_values.to(torch.float16),
         )
         return image, has_nsfw_concept
+    
+
+class SchnellPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup("flux-schnell")
+    
+    @torch.inference_mode()
+    def predict(
+        self,
+        prompt: str = SHARED_INPUTS.prompt,
+        aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        seed: int = SHARED_INPUTS.seed,
+        output_format: str = SHARED_INPUTS.output_format,
+        output_quality: int = SHARED_INPUTS.output_quality,
+        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+    ) -> Path:
+
+        return self.base_predict(prompt, aspect_ratio, output_format, output_quality, disable_safety_checker, seed=seed)
+    
+
+class DevPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup("flux-dev")
+    
+    @torch.inference_mode()
+    def predict(
+        self,
+        prompt: str = SHARED_INPUTS.prompt,
+        aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
+        seed: int = SHARED_INPUTS.seed,
+        output_format: str = SHARED_INPUTS.output_format,
+        output_quality: int = SHARED_INPUTS.output_quality,
+        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+    ) -> Path:
+
+        return self.base_predict(prompt, aspect_ratio, output_format, output_quality, disable_safety_checker, guidance=guidance, seed=seed)
