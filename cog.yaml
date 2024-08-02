@@ -20,6 +20,7 @@ build:
     - "transformers==4.43.3"
     - "tokenizers==0.19.1"
     - "protobuf==5.27.2"
+    - "diffusers"
 
   # commands run after the environment is setup
   run:

@@ -2,21 +2,38 @@ import os
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 
 import torch
+import numpy as np
 from einops import rearrange
 from PIL import Image
 from cog import BasePredictor, Input, Path, emit_metric
-from flux.util import load_ae, load_clip, load_flow_model, load_t5
+from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
 
+from diffusers.pipelines.stable_diffusion.safety_checker import (
+    StableDiffusionSafetyChecker,
+)
+from transformers import CLIPImageProcessor
+
+SAFETY_CACHE = "./safety-cache"
+FEATURE_EXTRACTOR = "./feature-extractor"
+SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
 
 class Predictor(BasePredictor):
     def setup(self) -> None:
         gpu_name = os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits").read().strip()
         print("Detected GPU:", gpu_name)
 
+        print("Loading safety checker...")
+        if not os.path.exists(SAFETY_CACHE):
+            download_weights(SAFETY_URL, SAFETY_CACHE)
+        self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
+            SAFETY_CACHE, torch_dtype=torch.float16
+        ).to("cuda")
+        self.feature_extractor = CLIPImageProcessor.from_pretrained(FEATURE_EXTRACTOR)
+
         # need > 48 GB of ram to store all models in VRAM
         self.offload = "A40" in gpu_name
 
-        self.flow_model_name = os.getenv("FLUX_MODEL", "flux-dev")
+        self.flow_model_name = os.getenv("FLUX_MODEL", "flux-schnell")
         print(f"Booting model {self.flow_model_name}")
 
         device = "cuda" 
@@ -53,7 +70,7 @@ class Predictor(BasePredictor):
             choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
             default="1:1",
         ),
-        guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
+        # guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
         # num_outputs: int = Input(description="Number of outputs to generate", default=1, le=4, ge=1),
         seed: int = Input(description="Random seed. Set for reproducible generation", default=None),
         output_format: str = Input(
@@ -66,6 +83,10 @@ class Predictor(BasePredictor):
             default=80,
             ge=0,
             le=100,
+        ),
+        disable_safety_checker: bool = Input(
+            description="Disable safety checker for generated images. This feature is only available through the API. See [https://replicate.com/docs/how-does-replicate-work#safety](https://replicate.com/docs/how-does-replicate-work#safety)",
+            default=False,
         ),
     ) -> Path:
         """Run a single prediction on the model"""
@@ -88,6 +109,7 @@ class Predictor(BasePredictor):
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
+            self.safety_checker = self.safety_checker.cpu()
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
 
@@ -109,6 +131,14 @@ class Predictor(BasePredictor):
         # bring into PIL format and save
         x = rearrange(x[0], "c h w -> h w c").clamp(-1, 1)
         img = Image.fromarray((127.5 * (x + 1.0)).cpu().byte().numpy())
+
+        if not disable_safety_checker:
+            if self.offload:
+                self.safety_checker = self.safety_checker.to("cuda")
+            _, has_nsfw_content = self.run_safety_checker(img)
+            if has_nsfw_content:
+                raise Exception(f"NSFW content detected. Try running it again, or try a different prompt.")
+
         output_path = f"out-0.{output_format}"
         if output_format != 'png':
             img.save(output_path, quality=output_quality, optimize=True)
@@ -118,3 +148,13 @@ class Predictor(BasePredictor):
         emit_metric("num_images", num_outputs)
         return Path(output_path)
 
+    def run_safety_checker(self, image):
+        safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(
+            "cuda"
+        )
+        np_image = np.array(image)
+        image, has_nsfw_concept = self.safety_checker(
+            images=np_image,
+            clip_input=safety_checker_input.pixel_values.to(torch.float16),
+        )
+        return image, has_nsfw_concept
