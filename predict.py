@@ -28,7 +28,7 @@ class SharedInputs:
             description="Aspect ratio for the generated image",
             choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
             default="1:1")
-    num_outputs: Input = Input(description="Number of outputs to generate", default=1, le=10, ge=1)
+    num_outputs: Input = Input(description="Number of outputs to generate", default=1, le=4, ge=1)
     seed: Input = Input(description="Random seed. Set for reproducible generation", default=None)
     output_format: Input = Input(
             description="Format of the output images",
