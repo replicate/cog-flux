@@ -16,4 +16,4 @@ else
     exit -1
 fi
 
-cog push r8.im/replicate-internal/flux-$1-internal-model
+cog push r8.im/replicate-internal/flux-$1
