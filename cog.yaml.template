@@ -11,7 +11,7 @@ build:
   python_packages:
     - "numpy<2"
     - "torch==2.2"
-    - "torchvision==0.17.0"
+    - "torchvision
     - "einops==0.8.0"
     - "fire >= 0.6.0"
     - "huggingface-hub==0.24.3"
