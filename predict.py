@@ -8,6 +8,7 @@ import torch
 import numpy as np
 from einops import rearrange
 from PIL import Image
+from typing import List
 from cog import BasePredictor, Input, Path, emit_metric
 from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
 
@@ -27,6 +28,7 @@ class SharedInputs:
             description="Aspect ratio for the generated image",
             choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
             default="1:1")
+    num_outputs: Input = Input(description="Number of outputs to generate", default=1, le=4, ge=1)
     seed: Input = Input(description="Random seed. Set for reproducible generation", default=None)
     output_format: Input = Input(
             description="Format of the output images",
@@ -101,19 +103,20 @@ class Predictor(BasePredictor):
         self,
         prompt: str,
         aspect_ratio: str,
+        num_outputs: int,
         output_format: str,
         output_quality: int,
         disable_safety_checker: bool,
         guidance: float = 3.5, # schnell ignores guidance within the model, fine to have default
         seed: Optional[int] = None,
-    ) -> Path:
+    ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = "cuda"
-        num_outputs = 1
         width, height = self.aspect_ratio_to_width_height(aspect_ratio)
         
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
+        print(f"Using seed: {seed}")
         
         x = get_noise(num_outputs, height, width, device=torch_device, dtype=torch.bfloat16, seed=seed)
 
@@ -122,8 +125,8 @@ class Predictor(BasePredictor):
             torch.cuda.empty_cache()
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
 
-        inp = prepare(self.t5, self.clip, x, prompt=prompt)
-        timesteps = get_schedule(self.num_steps, inp["img"].shape[1], shift=self.shift)
+        timesteps = get_schedule(self.num_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift)
+        inp = prepare(self.t5, self.clip, x, prompt=[prompt]*num_outputs)
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
@@ -142,25 +145,28 @@ class Predictor(BasePredictor):
         with torch.autocast(device_type=torch_device, dtype=torch.bfloat16):
             x = self.ae.decode(x)
 
-        # bring into PIL format and save
-        x = rearrange(x[0], "c h w -> h w c").clamp(-1, 1)
-        img = Image.fromarray((127.5 * (x + 1.0)).cpu().byte().numpy())
+        output_paths = []
+        for i in range(num_outputs):
+            # bring into PIL format and save
+            img = rearrange(x[i], "c h w -> h w c").clamp(-1, 1)
+            img = Image.fromarray((127.5 * (img + 1.0)).cpu().byte().numpy())
 
-        if not disable_safety_checker:
-            if self.offload:
-                self.safety_checker = self.safety_checker.to("cuda")
-            _, has_nsfw_content = self.run_safety_checker(img)
-            if has_nsfw_content[0]:
-                raise Exception(f"NSFW content detected. Try running it again, or try a different prompt.")
+            if not disable_safety_checker:
+                if self.offload:
+                    self.safety_checker = self.safety_checker.to("cuda")
+                _, has_nsfw_content = self.run_safety_checker(img)
+                if has_nsfw_content[0]:
+                    raise Exception(f"NSFW content detected in image {i+1}. Try running it again, or try a different prompt.")
 
-        output_path = f"out-0.{output_format}"
-        if output_format != 'png':
-            img.save(output_path, quality=output_quality, optimize=True)
-        else:
-            img.save(output_path)
+            output_path = f"out-{i}.{output_format}"
+            if output_format != 'png':
+                img.save(output_path, quality=output_quality, optimize=True)
+            else:
+                img.save(output_path)
+            output_paths.append(Path(output_path))
 
         emit_metric("num_images", num_outputs)
-        return Path(output_path)
+        return output_paths
 
     def run_safety_checker(self, image):
         safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(
@@ -183,13 +189,14 @@ class SchnellPredictor(Predictor):
         self,
         prompt: str = SHARED_INPUTS.prompt,
         aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        num_outputs: int = SHARED_INPUTS.num_outputs,
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-    ) -> Path:
+    ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, output_format, output_quality, disable_safety_checker, seed=seed)
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, seed=seed)
     
 
 class DevPredictor(Predictor):
@@ -201,11 +208,12 @@ class DevPredictor(Predictor):
         self,
         prompt: str = SHARED_INPUTS.prompt,
         aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        num_outputs: int = SHARED_INPUTS.num_outputs,
         guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-    ) -> Path:
+    ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, output_format, output_quality, disable_safety_checker, guidance=guidance, seed=seed)
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, seed=seed)
