@@ -50,7 +50,6 @@ class SharedInputs:
 
 SHARED_INPUTS = SharedInputs()
 
-
 class Predictor(BasePredictor):
     def setup(self) -> None:
         return
@@ -187,50 +186,54 @@ class Predictor(BasePredictor):
         if self.offload:
             self.ae.decoder.cpu()
             torch.cuda.empty_cache()
+            
+        images = [Image.fromarray((127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy()) for i in range(num_outputs)]
+
+        if not disable_safety_checker:
+            if self.offload:
+                self.safety_checker = self.safety_checker.to("cuda") # if `self.offload` was false, safety_checker is already on GPU
+                print("Safety checker moved to GPU for batch processing")
+
+            _, has_nsfw_content = self.run_safety_checker(images)
+            print(f"Batch safety check completed for {len(images)} images")
+
+            if self.offload:
+                self.safety_checker = self.safety_checker.cpu() # bring back to CPU (since `self.offload` was true)
+                torch.cuda.empty_cache()
+                print("Safety checker moved back to CPU and CUDA cache cleared")
+        else:
+            has_nsfw_content = [False] * num_outputs
+            print("Safety checker disabled, all images assumed safe")
 
         output_paths = []
-        nsfw_count = 0
-        for i in range(num_outputs):
-            # bring into PIL format and save
-            img = rearrange(x[i], "c h w -> h w c").clamp(-1, 1)
-            img = Image.fromarray((127.5 * (img + 1.0)).cpu().byte().numpy())
+        for i, (img, is_nsfw) in enumerate(zip(images, has_nsfw_content)):
+            if is_nsfw:
+                print(f"NSFW content detected in image {i+1}. This image will not be returned.")
+                continue
 
-            is_nsfw = False
-            if not disable_safety_checker:
-                if self.offload:
-                    self.safety_checker = self.safety_checker.to("cuda")
-                _, has_nsfw_content = self.run_safety_checker(img)
-                if has_nsfw_content[0]:
-                    is_nsfw = True
-                    nsfw_count += 1
-                    print(f"NSFW content detected in image {i+1}. This image will not be returned.")
+            output_path = f"out-{i}.{output_format}"
+            if output_format != 'png':
+                img.save(output_path, quality=output_quality, optimize=True)
+            else:
+                img.save(output_path)
+            output_paths.append(Path(output_path))
 
-            if not is_nsfw:
-                output_path = f"out-{i}.{output_format}"
-                if output_format != 'png':
-                    img.save(output_path, quality=output_quality, optimize=True)
-                else:
-                    img.save(output_path)
-                output_paths.append(Path(output_path))
-
+        print(f"Total safe images: {len(output_paths)} out of {num_outputs}")
         emit_metric("num_images", len(output_paths))
-        if nsfw_count > 0:
-            print(f"Total {nsfw_count} image(s) were filtered out due to NSFW content.")
+        
         if len(output_paths) == 0:
             raise Exception("All generated images contained NSFW content. Try running it again with a different prompt.")
+        
         return output_paths
-
-    def run_safety_checker(self, image):
-        safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(
-            "cuda"
-        )
-        np_image = np.array(image)
+    
+    def run_safety_checker(self, images):
+        safety_checker_input = self.feature_extractor(images, return_tensors="pt").to("cuda")
+        np_images = [np.array(img) for img in images]
         image, has_nsfw_concept = self.safety_checker(
-            images=np_image,
+            images=np_images,
             clip_input=safety_checker_input.pixel_values.to(torch.float16),
         )
         return image, has_nsfw_concept
-    
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
