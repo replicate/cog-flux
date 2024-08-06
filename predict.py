@@ -22,6 +22,7 @@ from transformers import CLIPImageProcessor
 SAFETY_CACHE = "./safety-cache"
 FEATURE_EXTRACTOR = "/src/feature-extractor"
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
+MAX_IMAGE_SIZE = 1536
 
 @dataclass
 class SharedInputs:
@@ -140,9 +141,10 @@ class Predictor(BasePredictor):
         if image:
             print("Image detected - settting to img2img mode")
             init_image = self.get_image(image)
-            width = init_image.shape[-1]
-            height = init_image.shape[-2]
-            print(f"Input image size: {width}x{height}")
+            # round input image width and height to nearest multiple of 16, max 1536
+            width = min(round(init_image.shape[-1] / 16) * 16, MAX_IMAGE_SIZE)
+            height = min(round(init_image.shape[-2] / 16) * 16, MAX_IMAGE_SIZE)
+            print(f"Input image size set to: {width}x{height}")
             init_image = init_image.to(torch_device)
             #resize
             init_image = torch.nn.functional.interpolate(init_image, (height, width))
