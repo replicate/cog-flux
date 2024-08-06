@@ -61,9 +61,9 @@ class Predictor(BasePredictor):
         gpu_name = os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits").read().strip()
         print("Detected GPU:", gpu_name)
 
-        print("Loading safety checker...")
         if not os.path.exists(SAFETY_CACHE):
             download_weights(SAFETY_URL, SAFETY_CACHE)
+        print("Loading Safety Checker to GPU")
         self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
             SAFETY_CACHE, torch_dtype=torch.float16
         ).to("cuda")
@@ -146,9 +146,11 @@ class Predictor(BasePredictor):
             #resize
             init_image = torch.nn.functional.interpolate(init_image, (height, width))
             if self.offload:
+                print("Loading AE decoder to GPU")
                 self.ae.encoder.to(torch_device)
             init_image = self.ae.encode(init_image)
             if self.offload:
+                print("Unloading AE decoder from GPU to CPU to CPU")
                 self.ae = self.ae.cpu()
                 torch.cuda.empty_cache()
 
@@ -163,20 +165,24 @@ class Predictor(BasePredictor):
             x = t * x + (1.0 - t) * init_image.to(x.dtype)
 
         if self.offload:
+            print("Loading T5 and CLIP models to GPU")
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt]*num_outputs)
 
         if self.offload:
+            print("Unloading T5 and CLIP models from GPU to CPU")
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
-            self.safety_checker = self.safety_checker.cpu()
             torch.cuda.empty_cache()
+            print("Loading Flux model to GPU")
             self.flux = self.flux.to(torch_device)
 
         x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
 
         if self.offload:
+            print("Unloading Flux model from GPU to CPU")
             self.flux.cpu()
             torch.cuda.empty_cache()
+            print("Loading AE decoder to GPU")
             self.ae.decoder.to(x.device)
         
         x = unpack(x.float(), height, width)
@@ -184,27 +190,15 @@ class Predictor(BasePredictor):
             x = self.ae.decode(x)
 
         if self.offload:
+            print("Unloading AE decoder from GPU to CPU")
             self.ae.decoder.cpu()
             torch.cuda.empty_cache()
             
         images = [Image.fromarray((127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy()) for i in range(num_outputs)]
-
+        has_nsfw_content = [False] * len(images)
         if not disable_safety_checker:
-            if self.offload:
-                self.safety_checker = self.safety_checker.to("cuda") # if `self.offload` was false, safety_checker is already on GPU
-                print("Safety checker moved to GPU for batch processing")
-
-            _, has_nsfw_content = self.run_safety_checker(images)
-            print(f"Batch safety check completed for {len(images)} images")
-
-            if self.offload:
-                self.safety_checker = self.safety_checker.cpu() # bring back to CPU (since `self.offload` was true)
-                torch.cuda.empty_cache()
-                print("Safety checker moved back to CPU and CUDA cache cleared")
-        else:
-            has_nsfw_content = [False] * num_outputs
-            print("Safety checker disabled, all images assumed safe")
-
+            _, has_nsfw_content = self.run_safety_checker(images) # always on gpu
+            
         output_paths = []
         for i, (img, is_nsfw) in enumerate(zip(images, has_nsfw_content)):
             if is_nsfw:
@@ -212,18 +206,15 @@ class Predictor(BasePredictor):
                 continue
 
             output_path = f"out-{i}.{output_format}"
-            if output_format != 'png':
-                img.save(output_path, quality=output_quality, optimize=True)
-            else:
-                img.save(output_path)
+            save_params = {'quality': output_quality, 'optimize': True} if output_format != 'png' else {}
+            img.save(output_path, **save_params)
             output_paths.append(Path(output_path))
 
-        print(f"Total safe images: {len(output_paths)} out of {num_outputs}")
-        emit_metric("num_images", len(output_paths))
-        
-        if len(output_paths) == 0:
+        if not output_paths:
             raise Exception("All generated images contained NSFW content. Try running it again with a different prompt.")
-        
+
+        print(f"Total safe images: {len(output_paths)} out of {len(images)}")
+        emit_metric("num_images", len(output_paths))
         return output_paths
     
     def run_safety_checker(self, images):
