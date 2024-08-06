@@ -22,6 +22,7 @@ from transformers import CLIPImageProcessor
 SAFETY_CACHE = "./safety-cache"
 FEATURE_EXTRACTOR = "/src/feature-extractor"
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
+MAX_IMAGE_SIZE = 1536
 
 @dataclass
 class SharedInputs:
@@ -143,8 +144,21 @@ class Predictor(BasePredictor):
             width = init_image.shape[-1]
             height = init_image.shape[-2]
             print(f"Input image size: {width}x{height}")
+
+            # Calculate the scaling factor if the image exceeds MAX_IMAGE_SIZE
+            scale = min(MAX_IMAGE_SIZE / width, MAX_IMAGE_SIZE / height, 1)
+            if scale < 1:
+                width = int(width * scale)
+                height = int(height * scale)
+                print(f"Scaling image down to {width}x{height}")
+
+            # Round image width and height to nearest multiple of 16
+            width = round(width / 16) * 16
+            height = round(height / 16) * 16
+            print(f"Input image size set to: {width}x{height}")
+
+            # Resize
             init_image = init_image.to(torch_device)
-            #resize
             init_image = torch.nn.functional.interpolate(init_image, (height, width))
             if self.offload:
                 self.ae.encoder.to(torch_device)
