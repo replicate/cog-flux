@@ -141,12 +141,24 @@ class Predictor(BasePredictor):
         if image:
             print("Image detected - settting to img2img mode")
             init_image = self.get_image(image)
-            # round input image width and height to nearest multiple of 16, max 1536
-            width = min(round(init_image.shape[-1] / 16) * 16, MAX_IMAGE_SIZE)
-            height = min(round(init_image.shape[-2] / 16) * 16, MAX_IMAGE_SIZE)
+            width = init_image.shape[-1]
+            height = init_image.shape[-2]
+            print(f"Input image size: {width}x{height}")
+
+            # Calculate the scaling factor if the image exceeds MAX_IMAGE_SIZE
+            scale = min(MAX_IMAGE_SIZE / width, MAX_IMAGE_SIZE / height, 1)
+            if scale < 1:
+                width = int(width * scale)
+                height = int(height * scale)
+                print(f"Scaling image down to {width}x{height}")
+
+            # Round image width and height to nearest multiple of 16
+            width = round(width / 16) * 16
+            height = round(height / 16) * 16
             print(f"Input image size set to: {width}x{height}")
+
+            # Resize
             init_image = init_image.to(torch_device)
-            #resize
             init_image = torch.nn.functional.interpolate(init_image, (height, width))
             if self.offload:
                 self.ae.encoder.to(torch_device)
