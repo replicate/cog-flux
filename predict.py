@@ -189,26 +189,35 @@ class Predictor(BasePredictor):
             torch.cuda.empty_cache()
 
         output_paths = []
+        nsfw_count = 0
         for i in range(num_outputs):
             # bring into PIL format and save
             img = rearrange(x[i], "c h w -> h w c").clamp(-1, 1)
             img = Image.fromarray((127.5 * (img + 1.0)).cpu().byte().numpy())
 
+            is_nsfw = False
             if not disable_safety_checker:
                 if self.offload:
                     self.safety_checker = self.safety_checker.to("cuda")
                 _, has_nsfw_content = self.run_safety_checker(img)
                 if has_nsfw_content[0]:
-                    raise Exception(f"NSFW content detected in image {i+1}. Try running it again, or try a different prompt.")
+                    is_nsfw = True
+                    nsfw_count += 1
+                    print(f"NSFW content detected in image {i+1}. This image will not be returned.")
 
-            output_path = f"out-{i}.{output_format}"
-            if output_format != 'png':
-                img.save(output_path, quality=output_quality, optimize=True)
-            else:
-                img.save(output_path)
-            output_paths.append(Path(output_path))
+            if not is_nsfw:
+                output_path = f"out-{i}.{output_format}"
+                if output_format != 'png':
+                    img.save(output_path, quality=output_quality, optimize=True)
+                else:
+                    img.save(output_path)
+                output_paths.append(Path(output_path))
 
-        emit_metric("num_images", num_outputs)
+        emit_metric("num_images", len(output_paths))
+        if nsfw_count > 0:
+            print(f"Total {nsfw_count} image(s) were filtered out due to NSFW content.")
+        if len(output_paths) == 0:
+            raise Exception("All generated images contained NSFW content. Try running it again with a different prompt.")
         return output_paths
 
     def run_safety_checker(self, image):
