@@ -9,6 +9,8 @@ import numpy as np
 from einops import rearrange
 from PIL import Image
 from typing import List
+from einops import rearrange
+from torchvision import transforms
 from cog import BasePredictor, Input, Path, emit_metric
 from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
 
@@ -71,7 +73,7 @@ class Predictor(BasePredictor):
         # need > 48 GB of ram to store all models in VRAM
         self.offload = "A40" in gpu_name
 
-        device = "cuda" 
+        device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
@@ -96,6 +98,19 @@ class Predictor(BasePredictor):
         }
         return aspect_ratios.get(aspect_ratio)
     
+    def get_image(self, image: str):
+        if image is None:
+            return None
+        image = Image.open(image).convert("RGB")
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: 2.0 * x - 1.0),
+            ]
+        )
+        img: torch.Tensor = transform(image)
+        return img[None, ...]
+    
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
 
@@ -108,25 +123,49 @@ class Predictor(BasePredictor):
         output_quality: int,
         disable_safety_checker: bool,
         guidance: float = 3.5, # schnell ignores guidance within the model, fine to have default
+        image: Path = None, # img2img for flux-dev
+        prompt_strength: float = 0.8,
         seed: Optional[int] = None,
     ) -> List[Path]:
         """Run a single prediction on the model"""
-        torch_device = "cuda"
+        torch_device = torch.device("cuda")
+        init_image = None
         width, height = self.aspect_ratio_to_width_height(aspect_ratio)
-        
+
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
-        
+
+        # img2img only works for flux-dev
+        if image:
+            print("Image detected - settting to img2img mode")
+            init_image = self.get_image(image)
+            width = init_image.shape[-1]
+            height = init_image.shape[-2]
+            print(f"Input image size: {width}x{height}")
+            init_image = init_image.to(torch_device)
+            #resize
+            init_image = torch.nn.functional.interpolate(init_image, (height, width))
+            if self.offload:
+                self.ae.encoder.to(torch_device)
+            init_image = self.ae.encode(init_image)
+            if self.offload:
+                self.ae = self.ae.cpu()
+                torch.cuda.empty_cache()
+
+        # prepare input
         x = get_noise(num_outputs, height, width, device=torch_device, dtype=torch.bfloat16, seed=seed)
+        timesteps = get_schedule(self.num_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift)
+
+        if init_image is not None:
+            t_idx = int((1.0 - prompt_strength) * self.num_steps)
+            t = timesteps[t_idx]
+            timesteps = timesteps[t_idx:]
+            x = t * x + (1.0 - t) * init_image.to(x.dtype)
 
         if self.offload:
-            self.ae = self.ae.cpu()
-            torch.cuda.empty_cache()
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
-
-        timesteps = get_schedule(self.num_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift)
-        inp = prepare(self.t5, self.clip, x, prompt=[prompt]*num_outputs)
+        inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt]*num_outputs)
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
@@ -142,8 +181,12 @@ class Predictor(BasePredictor):
             self.ae.decoder.to(x.device)
         
         x = unpack(x.float(), height, width)
-        with torch.autocast(device_type=torch_device, dtype=torch.bfloat16):
+        with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
             x = self.ae.decode(x)
+
+        if self.offload:
+            self.ae.decoder.cpu()
+            torch.cuda.empty_cache()
 
         output_paths = []
         for i in range(num_outputs):
@@ -208,6 +251,10 @@ class DevPredictor(Predictor):
         self,
         prompt: str = SHARED_INPUTS.prompt,
         aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        image: Path = Input(description="Input image for image to image mode. The aspect ratio of your output will match this image", default=None),
+        prompt_strength: float = Input(description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            ge=0.0, le=1.0, default=0.80,
+        ),
         num_outputs: int = SHARED_INPUTS.num_outputs,
         guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
         seed: int = SHARED_INPUTS.seed,
@@ -216,4 +263,4 @@ class DevPredictor(Predictor):
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
     ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, seed=seed)
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength,seed=seed)
