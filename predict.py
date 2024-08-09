@@ -22,7 +22,7 @@ from transformers import CLIPImageProcessor
 SAFETY_CACHE = "./safety-cache"
 FEATURE_EXTRACTOR = "/src/feature-extractor"
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
-MAX_IMAGE_SIZE = 1536
+MAX_IMAGE_SIZE = 1440
 
 @dataclass
 class SharedInputs:
@@ -122,6 +122,7 @@ class Predictor(BasePredictor):
         output_format: str,
         output_quality: int,
         disable_safety_checker: bool,
+        num_inference_steps: int,
         guidance: float = 3.5, # schnell ignores guidance within the model, fine to have default
         image: Path = None, # img2img for flux-dev
         prompt_strength: float = 0.8,
@@ -160,43 +161,36 @@ class Predictor(BasePredictor):
             init_image = init_image.to(torch_device)
             init_image = torch.nn.functional.interpolate(init_image, (height, width))
             if self.offload:
-                print("Loading AE decoder to GPU")
                 self.ae.encoder.to(torch_device)
             init_image = self.ae.encode(init_image)
             if self.offload:
-                print("Unloading AE decoder from GPU to CPU to CPU")
                 self.ae = self.ae.cpu()
                 torch.cuda.empty_cache()
 
         # prepare input
         x = get_noise(num_outputs, height, width, device=torch_device, dtype=torch.bfloat16, seed=seed)
-        timesteps = get_schedule(self.num_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift)
+        timesteps = get_schedule(num_inference_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift)
 
         if init_image is not None:
-            t_idx = int((1.0 - prompt_strength) * self.num_steps)
+            t_idx = int((1.0 - prompt_strength) * num_inference_steps)
             t = timesteps[t_idx]
             timesteps = timesteps[t_idx:]
             x = t * x + (1.0 - t) * init_image.to(x.dtype)
 
         if self.offload:
-            print("Loading T5 and CLIP models to GPU")
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt]*num_outputs)
 
         if self.offload:
-            print("Unloading T5 and CLIP models from GPU to CPU")
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
             torch.cuda.empty_cache()
-            print("Loading Flux model to GPU")
             self.flux = self.flux.to(torch_device)
 
         x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
 
         if self.offload:
-            print("Unloading Flux model from GPU to CPU")
             self.flux.cpu()
             torch.cuda.empty_cache()
-            print("Loading AE decoder to GPU")
             self.ae.decoder.to(x.device)
         
         x = unpack(x.float(), height, width)
@@ -204,7 +198,6 @@ class Predictor(BasePredictor):
             x = self.ae.decode(x)
 
         if self.offload:
-            print("Unloading AE decoder from GPU to CPU")
             self.ae.decoder.cpu()
             torch.cuda.empty_cache()
             
@@ -256,7 +249,7 @@ class SchnellPredictor(Predictor):
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
     ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, seed=seed)
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed)
     
 
 class DevPredictor(Predictor):
@@ -273,6 +266,7 @@ class DevPredictor(Predictor):
             ge=0.0, le=1.0, default=0.80,
         ),
         num_outputs: int = SHARED_INPUTS.num_outputs,
+        num_inference_steps: int = Input(description="Number of denoising steps. Recommended range is 28-50", ge=1, le=50, default=50),
         guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
@@ -280,4 +274,4 @@ class DevPredictor(Predictor):
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
     ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength,seed=seed)
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed)
