@@ -10,7 +10,6 @@ run `script/select.sh (dev,schnell)` and that'll create a cog.yaml configured fo
 
 ### Pushing a model
 
-run `script/push.sh (dev,schnell)` to push the model to Replicate. Note that these models are currently configured
-to push to replicate internal repos. 
+run `script/push.sh (dev,schnell) (test, prod)` to push the model to Replicate. 
 
-To push all models, run `script/cog-push-all.sh`
+To push all models, run `script/prod-deploy-all.sh`. Note that after doing this you'll still need to manually go in and update deployments. 
