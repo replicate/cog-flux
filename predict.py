@@ -11,7 +11,7 @@ from PIL import Image
 from typing import List
 from einops import rearrange
 from torchvision import transforms
-from cog import BasePredictor, Input, Path, emit_metric
+from cog import BasePredictor, Input, Path
 from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
 
 from diffusers.pipelines.stable_diffusion.safety_checker import (
@@ -221,7 +221,6 @@ class Predictor(BasePredictor):
             raise Exception("All generated images contained NSFW content. Try running it again with a different prompt.")
 
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
-        emit_metric("num_images", len(output_paths))
         return output_paths
     
     def run_safety_checker(self, images):
