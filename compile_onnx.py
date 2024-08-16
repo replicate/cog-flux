@@ -15,7 +15,7 @@ def get_rand_inputs():
     txt_ids = torch.rand((1, 512, 3), dtype=torch.float32, device="cuda")
 
     vec = torch.randn((1, 768), dtype=torch.bfloat16, device="cuda")
-    guidance = torch.randn((1), dtype=torch.bfloat16, device="cuda") * 7
+    guidance = torch.randn((1), dtype=torch.bfloat16, device="cuda") 
     timestep = torch.randn((1), dtype=torch.bfloat16, device="cuda")
     torch.cat((txt_ids, img_ids), dim=1)
 
