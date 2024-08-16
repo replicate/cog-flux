@@ -192,7 +192,8 @@ class Predictor(BasePredictor):
 
         if self.compile_run:
             torch._dynamo.mark_dynamic(inp['img'], 1, min=3808, max=4096)
-            torch._dynamo.mark_dynamic(inp['img'], 0, min=1, max=4)
+            torch._dynamo.mark_dynamic(inp['img'], 1, min=3808, max=4096)
+
             self.flux = torch.compile(self.flux)
             self.compile_run = False
 
