@@ -1,5 +1,4 @@
 import os
-import pickle
 import time
 from typing import Optional
 
@@ -191,13 +190,18 @@ class Predictor(BasePredictor):
             self.flux = self.flux.to(torch_device)
 
         if self.compile_run:
-            torch._dynamo.mark_dynamic(inp['img'], 1, min=3808, max=4096)
-            torch._dynamo.mark_dynamic(inp['img'], 1, min=3808, max=4096)
+            print("Compiling")
+            st = time.time()
+            torch._dynamo.mark_dynamic(inp['img'], 1) #min=3808, max=4096) needs torch 2.4 
+            torch._dynamo.mark_dynamic(inp['img_ids'], 1) #min=3808, max=4096)
 
             self.flux = torch.compile(self.flux)
-            self.compile_run = False
 
         x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
+
+        if self.compile_run:
+            print(f"Compiled in {time.time() - st}")
+            self.compile_run = False
 
         if self.offload:
             self.flux.cpu()
