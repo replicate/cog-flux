@@ -82,6 +82,7 @@ class Predictor(BasePredictor):
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 50
         self.shift = self.flow_model_name != "flux-schnell"
+        self.compile_run = True
 
     
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
@@ -186,6 +187,12 @@ class Predictor(BasePredictor):
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
 
+        if self.compile_run:
+            torch._dynamo.mark_dynamic(inp['img'], 1, min=3808, max=4096)
+            torch._dynamo.mark_dynamic(inp['img'], 0, min=1, max=4)
+            self.flux = torch.compile(self.flux)
+            self.compile_run = False
+
         x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
 
         if self.offload:
@@ -235,6 +242,15 @@ class Predictor(BasePredictor):
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-schnell")
+        self.predict(
+            prompt="a cool dog",
+            aspect_ratio="1:1",
+            num_outputs=1,
+            output_format='png',
+            output_quality=80,
+            disable_safety_checker=True,
+            seed=123
+        )
     
     @torch.inference_mode()
     def predict(
@@ -254,6 +270,19 @@ class SchnellPredictor(Predictor):
 class DevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-dev")
+        self.predict(
+            prompt="a cool dog",
+            aspect_ratio="1:1",
+            image=None,
+            prompt_strength=1,
+            num_outputs=1,
+            num_inference_steps=28,
+            guidance=3.5,
+            output_format='png',
+            output_quality=80,
+            disable_safety_checker=True,
+            seed=123
+        )
     
     @torch.inference_mode()
     def predict(
