@@ -85,6 +85,35 @@ class Predictor(BasePredictor):
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = True
 
+    def compile_flux(self):
+        print("compiling")
+        st = time.time()
+        img = torch.randn(1, 4096, 64, dtype=torch.bfloat16, device="cuda")
+        img_ids = torch.randint(0, 1000, (1, 4096, 3), device="cuda")
+        txt = torch.randn(1, 512, 4096, dtype=torch.bfloat16, device="cuda")
+        txt_ids = torch.randint(0, 1000, (1, 512, 3), device="cuda")
+        vec = torch.randn(1, 768, dtype=torch.bfloat16, device="cuda")
+        t_vec = torch.full((1,), 0.5, dtype=torch.bfloat16, device="cuda")
+        guidance_vec = torch.full((1,), 4.0, dtype=torch.bfloat16, device="cuda")
+
+        torch._dynamo.mark_dynamic(img, 1) #min=3808, max=4096) needs torch 2.4 for min/max
+        torch._dynamo.mark_dynamic(img_ids, 1) #min=3808, max=4096)
+        if self.offload:
+            self.flux = self.flux.to("cuda")
+        self.flux = torch.compile(self.flux)
+        self.flux(
+            img=img,
+            img_ids=img_ids,
+            txt=txt,
+            txt_ids=txt_ids,
+            y=vec,
+            timesteps=t_vec,
+            guidance=guidance_vec
+        )
+        print(f"Compiled in {time.time() - st}")
+        if self.offload:
+            self.flux = self.flux.to("cpu")
+            torch.cuda.empty_cache()
     
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         aspect_ratios = {
@@ -191,16 +220,17 @@ class Predictor(BasePredictor):
         if self.compile_run:
             print("Compiling")
             st = time.time()
-            torch._dynamo.mark_dynamic(inp['img'], 1) #min=3808, max=4096) needs torch 2.4 
-            torch._dynamo.mark_dynamic(inp['img_ids'], 1) #min=3808, max=4096)
+            # torch._dynamo.mark_dynamic(inp['img'], 1) #min=3808, max=4096) needs torch 2.4 
+            # torch._dynamo.mark_dynamic(inp['img_ids'], 1) #min=3808, max=4096)
 
-            self.flux = torch.compile(self.flux)
+            # self.flux = torch.compile(self.flux)
 
-        x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
+        x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run)
 
         if self.compile_run:
             print(f"Compiled in {time.time() - st}")
             self.compile_run = False
+            self.flux = flux
 
         if self.offload:
             self.flux.cpu()
