@@ -96,6 +96,7 @@ def get_schedule(
 
 
 def denoise_single_item(
+def denoise_single_item(
     model: Flux,
     img: Tensor,
     img_ids: Tensor,
@@ -114,11 +115,11 @@ def denoise_single_item(
     guidance_vec = torch.full((1,), guidance, device=img.device, dtype=img.dtype)
 
     if compile_run: 
-        torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
-        torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
+        torch._dynamo.mark_dynamic(img, 1) #min=3808, max=4096) needs torch 2.4 
+        torch._dynamo.mark_dynamic(img_ids, 1) #min=3808, max=4096)
         model = torch.compile(model)
 
-    for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
+    for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
         
         pred = model(
@@ -131,6 +132,42 @@ def denoise_single_item(
             guidance=guidance_vec,
         )
 
+        img = img + (t_prev - t_curr) * pred.squeeze(0)
+
+    return img, model
+
+def denoise(
+    model: Flux,
+    # model input
+    img: Tensor,
+    img_ids: Tensor,
+    txt: Tensor,
+    txt_ids: Tensor,
+    vec: Tensor,
+    # sampling parameters
+    timesteps: list[float],
+    guidance: float = 4.0,
+    compile_run: bool = False
+):
+    batch_size = img.shape[0]
+    output_imgs = []
+
+    for i in range(batch_size):
+        denoised_img, model = denoise_single_item(
+            model,
+            img[i],
+            img_ids[i],
+            txt[i],
+            txt_ids[i],
+            vec[i],
+            timesteps,
+            guidance,
+            compile_run
+        )
+        compile_run = False
+        output_imgs.append(denoised_img)
+    
+    return torch.cat(output_imgs), model
         img = img + (t_prev - t_curr) * pred.squeeze(0)
 
     return img, model
