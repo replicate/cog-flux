@@ -56,7 +56,7 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name) -> None:
+    def base_setup(self, flow_model_name: str, compile: bool) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -79,11 +79,27 @@ class Predictor(BasePredictor):
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
         self.flux = load_flow_model(self.flow_model_name, device="cpu" if self.offload else device)
+        self.flux = self.flux.eval()
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 50
         self.shift = self.flow_model_name != "flux-schnell"
-        self.compile_run = True
+        self.compile_run = False
+        if compile:
+            self.compile_run = True
+            self.predict(
+                prompt="a cool dog",
+                aspect_ratio="1:1",
+                image=None,
+                prompt_strength=1,
+                num_outputs=1,
+                num_inference_steps=self.num_steps,
+                guidance=3.5,
+                output_format='png',
+                output_quality=80,
+                disable_safety_checker=True,
+                seed=123
+            )
 
     def compile_flux(self):
         print("compiling")
@@ -220,10 +236,6 @@ class Predictor(BasePredictor):
         if self.compile_run:
             print("Compiling")
             st = time.time()
-            # torch._dynamo.mark_dynamic(inp['img'], 1) #min=3808, max=4096) needs torch 2.4 
-            # torch._dynamo.mark_dynamic(inp['img_ids'], 1) #min=3808, max=4096)
-
-            # self.flux = torch.compile(self.flux)
 
         x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run)
 
@@ -278,16 +290,7 @@ class Predictor(BasePredictor):
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell")
-        self.predict(
-            prompt="a cool dog",
-            aspect_ratio="1:1",
-            num_outputs=1,
-            output_format='png',
-            output_quality=80,
-            disable_safety_checker=True,
-            seed=123
-        )
+        self.base_setup("flux-schnell", compile=False)
     
     @torch.inference_mode()
     def predict(
@@ -306,20 +309,7 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev")
-        self.predict(
-            prompt="a cool dog",
-            aspect_ratio="1:1",
-            image=None,
-            prompt_strength=1,
-            num_outputs=1,
-            num_inference_steps=28,
-            guidance=3.5,
-            output_format='png',
-            output_quality=80,
-            disable_safety_checker=True,
-            seed=123
-        )
+        self.base_setup("flux-dev", compile=True)
     
     @torch.inference_mode()
     def predict(
