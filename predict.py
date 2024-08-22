@@ -1,4 +1,5 @@
 import os
+import pickle
 import time
 from typing import Optional
 
@@ -88,6 +89,7 @@ class Predictor(BasePredictor):
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
         if compile:
+            torch._inductor.config.fallback_random = True
             self.compile_run = True
             self.predict(
                 prompt="a cool dog",
@@ -107,27 +109,44 @@ class Predictor(BasePredictor):
         print("compiling")
         st = time.time()
         img = torch.randn(1, 4096, 64, dtype=torch.bfloat16, device="cuda")
-        img_ids = torch.randint(0, 1000, (1, 4096, 3), device="cuda")
         txt = torch.randn(1, 512, 4096, dtype=torch.bfloat16, device="cuda")
-        txt_ids = torch.randint(0, 1000, (1, 512, 3), device="cuda")
         vec = torch.randn(1, 768, dtype=torch.bfloat16, device="cuda")
+
+
+        h = 1024 // 8
+        w = h
+
+        from einops import repeat
+        img_ids = torch.zeros(h // 2, w // 2, 3)
+        img_ids[..., 1] = img_ids[..., 1] + torch.arange(h // 2)[:, None]
+        img_ids[..., 2] = img_ids[..., 2] + torch.arange(w // 2)[None, :]
+        img_ids = repeat(img_ids, "h w c -> b (h w) c", b=1)
+        img_ids = img_ids.to("cuda")
+
+
+        txt_ids = torch.zeros(1, 512, 3, device="cuda")
         t_vec = torch.full((1,), 0.5, dtype=torch.bfloat16, device="cuda")
         guidance_vec = torch.full((1,), 4.0, dtype=torch.bfloat16, device="cuda")
 
+
+        if self.offload:
+            self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
+            torch.cuda.empty_cache()
+            self.flux = self.flux.to("cuda")
+
         torch._dynamo.mark_dynamic(img, 1) #min=3808, max=4096) needs torch 2.4 for min/max
         torch._dynamo.mark_dynamic(img_ids, 1) #min=3808, max=4096)
-        if self.offload:
-            self.flux = self.flux.to("cuda")
         self.flux = torch.compile(self.flux)
-        self.flux(
-            img=img,
-            img_ids=img_ids,
-            txt=txt,
-            txt_ids=txt_ids,
-            y=vec,
-            timesteps=t_vec,
-            guidance=guidance_vec
-        )
+        with torch.inference_mode():
+            self.flux(
+                img=img,
+                img_ids=img_ids,
+                txt=txt,
+                txt_ids=txt_ids,
+                y=vec,
+                timesteps=t_vec,
+                guidance=guidance_vec
+            )
         print(f"Compiled in {time.time() - st}")
         if self.offload:
             self.flux = self.flux.to("cpu")
@@ -332,4 +351,3 @@ class DevPredictor(Predictor):
     ) -> List[Path]:
 
         return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed)
-    # 

@@ -117,9 +117,9 @@ def denoise_single_item(
     if compile_run: 
         torch._dynamo.mark_dynamic(img, 1) #min=3808, max=4096) needs torch 2.4 
         torch._dynamo.mark_dynamic(img_ids, 1) #min=3808, max=4096)
-        model = torch.compile(model)
+        model = torch.compile(model, mode="max-autotune")
 
-    for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
+    for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
         
         pred = model(
