@@ -4,6 +4,7 @@ from typing import Callable
 import torch
 from einops import rearrange, repeat
 from torch import Tensor
+from tqdm.auto import tqdm
 
 from .model import Flux
 from .modules.conditioner import HFEmbedder
@@ -108,7 +109,7 @@ def denoise(
 ):
     # this is ignored for schnell
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
-    for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
+    for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
         pred = model(
             img=img,

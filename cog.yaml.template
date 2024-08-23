@@ -10,8 +10,8 @@ build:
 
   python_packages:
     - "numpy<2"
-    - "torch==2.2"
-    - "torchvision==0.17.0"
+    - "torch==2.3.0"
+    - "torchvision==0.18.0"
     - "einops==0.8.0"
     - "fire >= 0.6.0"
     - "huggingface-hub==0.24.3"
@@ -25,3 +25,5 @@ build:
   # commands run after the environment is setup
   run:
     - curl -o /usr/local/bin/pget -L "https://github.com/replicate/pget/releases/download/v0.8.2/pget_linux_x86_64" && chmod +x /usr/local/bin/pget
+    - pip install nexfort==0.1.dev264
+    - pip install --pre onediff

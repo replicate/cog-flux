@@ -1,6 +1,8 @@
 import os
+import time
 from typing import Optional
 
+from onediff.infer_compiler import compile
 from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 
@@ -55,7 +57,7 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name) -> None:
+    def base_setup(self, flow_model_name, do_compile=False) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -75,13 +77,36 @@ class Predictor(BasePredictor):
 
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
-        self.t5 = load_t5(device, max_length=max_length)
-        self.clip = load_clip(device)
+        self.t5 = load_t5(device="cpu" if self.offload else device, max_length=max_length)
+        self.clip = load_clip(device="cpu" if self.offload else device)
         self.flux = load_flow_model(self.flow_model_name, device="cpu" if self.offload else device)
+       #self.flux = self.flux.eval()
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 50
         self.shift = self.flow_model_name != "flux-schnell"
+        print("setting up Predictor")
+
+        if do_compile:
+            with torch.inference_mode():
+                st = time.time()
+                self.flux = self.flux.to("cuda")
+
+                print("compiling")
+                # need a recursive compiler
+                self.flux = compile(self.flux, backend="nexfort", options='{"mode": "O3"}')
+                print("maybe compiled")
+                print("compilation maybe time =", time.time() - st)
+
+                st = time.time()
+                print("predicting")
+                self.base_predict("a cool dog", "1:1", 1, 'png', 80, True, 28, 3.5, None, .8, 123)
+                print("predicted in ", time.time() - st)
+
+                st = time.time()
+                print("predicting again")
+                self.base_predict("a cool doggo", "1:1", 1, 'png', 80, True, 28, 3.5, None, .8, 1234)
+                print("predicted in ", time.time() - st)
 
     
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
@@ -253,7 +278,7 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev")
+        self.base_setup("flux-dev", do_compile=True)
     
     @torch.inference_mode()
     def predict(
@@ -272,5 +297,4 @@ class DevPredictor(Predictor):
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
     ) -> List[Path]:
-
         return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed)
