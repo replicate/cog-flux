@@ -83,7 +83,7 @@ class Predictor(BasePredictor):
         self.flux = self.flux.eval()
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
 
-        self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 50
+        self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
         if compile:
@@ -295,7 +295,7 @@ class DevPredictor(Predictor):
         ),
         num_outputs: int = SHARED_INPUTS.num_outputs,
         num_inference_steps: int = Input(description="Number of denoising steps. Recommended range is 28-50", ge=1, le=50, default=50),
-        guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
+        guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
