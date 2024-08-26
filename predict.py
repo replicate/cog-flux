@@ -80,7 +80,7 @@ class Predictor(BasePredictor):
         self.t5 = load_t5(device="cpu" if self.offload else device, max_length=max_length)
         self.clip = load_clip(device="cpu" if self.offload else device)
         self.flux = load_flow_model(self.flow_model_name, device="cpu" if self.offload else device)
-       #self.flux = self.flux.eval()
+        self.flux = self.flux.eval()
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 50
