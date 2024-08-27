@@ -16,10 +16,10 @@ from PIL import Image
 from io import BytesIO
 import numpy as np
 
-ENV = os.getenv("TEST_ENV", "local")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
 LOCAL_ENDPOINT = "http://localhost:5000/predictions"
-MODEL = os.getenv("MODEL", "no model configured")
-IS_DEV = "dev" in MODEL
+MODEL_NAME = os.getenv("MODEL_NAME", "no model configured")
+IS_DEV = "dev" in MODEL_NAME
 
 
 def local_run(model_endpoint: str, model_input: dict):
@@ -85,19 +85,19 @@ def wait_for_server_to_be_ready(url, timeout=400):
 
 @pytest.fixture(scope="session")
 def inference_func():
-    if ENV == "local":
+    if ENVIRONMENT == "local":
         return partial(local_run, LOCAL_ENDPOINT)
-    elif ENV in {"test", "prod"}:
-        model = replicate.models.get(MODEL)
+    elif ENVIRONMENT in {"test", "prod"}:
+        model = replicate.models.get(MODEL_NAME)
         version = model.versions.list()[0]
         return partial(replicate_run, version)
     else:
-        raise Exception(f"env should be local, test, or prod but was {ENV}")
+        raise Exception(f"env should be local, test, or prod but was {ENVIRONMENT}")
 
 
 @pytest.fixture(scope="session", autouse=True)
 def service():
-    if ENV == "local":
+    if ENVIRONMENT == "local":
         print("building model")
         # starts local server if we're running things locally
         build_command = "cog build -t test-model".split()

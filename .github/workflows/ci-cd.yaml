@@ -125,4 +125,4 @@ jobs:
         MODEL: ${{ matrix.model }}
         TEST_ENV: ${{ matrix.env }}
       run: |
-        pytest integration-tests
+        ./script/test.sh ${{ matrix.model }} ${{ matrix.env }}
