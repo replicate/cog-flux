@@ -92,12 +92,12 @@ def wait_for_server_to_be_ready(url, timeout=400):
 def inference_func():
     if ENV == 'local':
         return partial(local_run, LOCAL_ENDPOINT)
-    elif ENV in {'staging', 'prod'}:
+    elif ENV in {'test', 'prod'}:
         model = replicate.models.get(MODEL)
         version = model.versions.list()[0]
         return partial(replicate_run, version)
     else:
-        raise Exception(f"env should be local, staging, or prod but was {ENV}")
+        raise Exception(f"env should be local, test, or prod but was {ENV}")
 
 
 @pytest.fixture(scope="session", autouse=True)

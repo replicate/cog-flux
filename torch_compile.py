@@ -56,4 +56,3 @@ p.flux = torch.compile(p.flux)
 # 1440:1440
 # torch.Size([1, 16, 180, 180])
 # torch.Size([1, 8100, 64])
-_
