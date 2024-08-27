@@ -4,6 +4,7 @@ from typing import Callable
 import torch
 from einops import rearrange, repeat
 from torch import Tensor
+from tqdm.auto import tqdm
 
 from .model import Flux
 from .modules.conditioner import HFEmbedder
@@ -94,6 +95,46 @@ def get_schedule(
     return timesteps.tolist()
 
 
+def denoise_single_item(
+    model: Flux,
+    img: Tensor,
+    img_ids: Tensor,
+    txt: Tensor,
+    txt_ids: Tensor,
+    vec: Tensor,
+    timesteps: list[float],
+    guidance: float = 4.0,
+    compile_run: bool = False
+):
+    img = img.unsqueeze(0)
+    img_ids = img_ids.unsqueeze(0)
+    txt = txt.unsqueeze(0)
+    txt_ids = txt_ids.unsqueeze(0)
+    vec = vec.unsqueeze(0)
+    guidance_vec = torch.full((1,), guidance, device=img.device, dtype=img.dtype)
+
+    if compile_run: 
+        torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
+        torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
+        model = torch.compile(model)
+
+    for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
+        t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
+        
+        pred = model(
+            img=img,
+            img_ids=img_ids,
+            txt=txt,
+            txt_ids=txt_ids,
+            y=vec,
+            timesteps=t_vec,
+            guidance=guidance_vec,
+        )
+
+        img = img + (t_prev - t_curr) * pred.squeeze(0)
+
+    return img, model
+
 def denoise(
     model: Flux,
     # model input
@@ -105,25 +146,27 @@ def denoise(
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
+    compile_run: bool = False
 ):
-    # this is ignored for schnell
-    guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
-    for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
-        t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
-        pred = model(
-            img=img,
-            img_ids=img_ids,
-            txt=txt,
-            txt_ids=txt_ids,
-            y=vec,
-            timesteps=t_vec,
-            guidance=guidance_vec,
+    batch_size = img.shape[0]
+    output_imgs = []
+
+    for i in range(batch_size):
+        denoised_img, model = denoise_single_item(
+            model,
+            img[i],
+            img_ids[i],
+            txt[i],
+            txt_ids[i],
+            vec[i],
+            timesteps,
+            guidance,
+            compile_run
         )
-
-        img = img + (t_prev - t_curr) * pred
-
-    return img
-
+        compile_run = False
+        output_imgs.append(denoised_img)
+    
+    return torch.cat(output_imgs), model
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
     return rearrange(

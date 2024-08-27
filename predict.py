@@ -1,4 +1,6 @@
 import os
+import pickle
+import time
 from typing import Optional
 
 from attr import dataclass
@@ -55,7 +57,7 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name) -> None:
+    def base_setup(self, flow_model_name: str, compile: bool) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -78,10 +80,28 @@ class Predictor(BasePredictor):
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
         self.flux = load_flow_model(self.flow_model_name, device="cpu" if self.offload else device)
+        self.flux = self.flux.eval()
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
 
-        self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 50
+        self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
+        self.compile_run = False
+        if compile:
+            torch._inductor.config.fallback_random = True
+            self.compile_run = True
+            self.predict(
+                prompt="a cool dog",
+                aspect_ratio="1:1",
+                image=None,
+                prompt_strength=1,
+                num_outputs=1,
+                num_inference_steps=self.num_steps,
+                guidance=3.5,
+                output_format='png',
+                output_quality=80,
+                disable_safety_checker=True,
+                seed=123
+            )
 
     
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
@@ -186,7 +206,16 @@ class Predictor(BasePredictor):
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
 
-        x = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance)
+        if self.compile_run:
+            print("Compiling")
+            st = time.time()
+
+        x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run)
+
+        if self.compile_run:
+            print(f"Compiled in {time.time() - st}")
+            self.compile_run = False
+            self.flux = flux
 
         if self.offload:
             self.flux.cpu()
@@ -234,7 +263,7 @@ class Predictor(BasePredictor):
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell")
+        self.base_setup("flux-schnell", compile=False)
     
     @torch.inference_mode()
     def predict(
@@ -253,7 +282,7 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev")
+        self.base_setup("flux-dev", compile=True)
     
     @torch.inference_mode()
     def predict(
@@ -265,8 +294,8 @@ class DevPredictor(Predictor):
             ge=0.0, le=1.0, default=0.80,
         ),
         num_outputs: int = SHARED_INPUTS.num_outputs,
-        num_inference_steps: int = Input(description="Number of denoising steps. Recommended range is 28-50", ge=1, le=50, default=50),
-        guidance: float = Input(description="Guidance for generated image. Ignored for flux-schnell", ge=0, le=10, default=3.5),
+        num_inference_steps: int = Input(description="Number of denoising steps. Recommended range is 28-50", ge=1, le=50, default=28),
+        guidance: float = Input(description="Guidance for generated image", ge=0, le=10, default=3),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
