@@ -16,9 +16,9 @@ from PIL import Image
 from io import BytesIO
 import numpy as np
 
-ENV = os.getenv('TEST_ENV', 'local')
+ENV = os.getenv("TEST_ENV", "local")
 LOCAL_ENDPOINT = "http://localhost:5000/predictions"
-MODEL = os.getenv('MODEL', 'no model configured')
+MODEL = os.getenv("MODEL", "no model configured")
 IS_DEV = "dev" in MODEL
 
 
@@ -42,14 +42,11 @@ def local_run(model_endpoint: str, model_input: dict):
 
 
 def replicate_run(version: str, model_input: dict):
-    pred = replicate.predictions.create(
-        version=version,
-        input=model_input
-    )
+    pred = replicate.predictions.create(version=version, input=model_input)
 
     pred.wait()
-    
-    predict_time = pred.metrics['predict_time']
+
+    predict_time = pred.metrics["predict_time"]
     images = []
     for url in pred.output:
         response = requests.get(url)
@@ -75,9 +72,7 @@ def wait_for_server_to_be_ready(url, timeout=400):
             if data["status"] == "READY":
                 return
             elif data["status"] == "SETUP_FAILED":
-                raise RuntimeError(
-                    "Server initialization failed with status: SETUP_FAILED"
-                )
+                raise RuntimeError("Server initialization failed with status: SETUP_FAILED")
 
         except requests.RequestException:
             pass
@@ -90,9 +85,9 @@ def wait_for_server_to_be_ready(url, timeout=400):
 
 @pytest.fixture(scope="session")
 def inference_func():
-    if ENV == 'local':
+    if ENV == "local":
         return partial(local_run, LOCAL_ENDPOINT)
-    elif ENV in {'test', 'prod'}:
+    elif ENV in {"test", "prod"}:
         model = replicate.models.get(MODEL)
         version = model.versions.list()[0]
         return partial(replicate_run, version)
@@ -102,23 +97,23 @@ def inference_func():
 
 @pytest.fixture(scope="session", autouse=True)
 def service():
-    if ENV == 'local':
+    if ENV == "local":
         print("building model")
         # starts local server if we're running things locally
-        build_command = 'cog build -t test-model'.split()
+        build_command = "cog build -t test-model".split()
         subprocess.run(build_command, check=True)
-        container_name = 'cog-test'
+        container_name = "cog-test"
         try:
-            subprocess.check_output(['docker', 'inspect', '--format="{{.State.Running}}"', container_name])
+            subprocess.check_output(["docker", "inspect", '--format="{{.State.Running}}"', container_name])
             print(f"Container '{container_name}' is running. Stopping and removing...")
-            subprocess.check_call(['docker', 'stop', container_name])
-            subprocess.check_call(['docker', 'rm', container_name])
+            subprocess.check_call(["docker", "stop", container_name])
+            subprocess.check_call(["docker", "rm", container_name])
             print(f"Container '{container_name}' stopped and removed.")
         except subprocess.CalledProcessError:
             # Container not found
             print(f"Container '{container_name}' not found or not running.")
 
-        run_command = f'docker run -d -p 5000:5000 --gpus all --name {container_name} test-model '.split()
+        run_command = f"docker run -d -p 5000:5000 --gpus all --name {container_name} test-model ".split()
         process = subprocess.Popen(run_command, stdout=sys.stdout, stderr=sys.stderr)
 
         wait_for_server_to_be_ready("http://localhost:5000/health-check")
@@ -137,11 +132,10 @@ def get_time_bound():
     return 20 if IS_DEV else 10
 
 
-
 def test_base_generation(inference_func):
     """standard generation for dev and schnell. assert that the output image has a dog in it with blip-2 or llava"""
     test_example = {
-        'prompt': "A cool dog",
+        "prompt": "A cool dog",
         "aspect ratio": "1:1",
         "num_outputs": 1,
     }
@@ -157,7 +151,7 @@ def test_num_outputs(inference_func):
     base_time = None
     for n_outputs in range(1, 5):
         test_example = {
-            'prompt': "A cool dog",
+            "prompt": "A cool dog",
             "aspect ratio": "1:1",
             "num_outputs": n_outputs,
         }
@@ -169,15 +163,9 @@ def test_num_outputs(inference_func):
             base_time = time
 
 
-
 def test_determinism(inference_func):
     """determinism - test with the same seed twice"""
-    test_example = {
-        'prompt': "A cool dog",
-        "aspect_ratio": "9:16",
-        "num_outputs": 1,
-        "seed": 112358
-    }
+    test_example = {"prompt": "A cool dog", "aspect_ratio": "9:16", "num_outputs": 1, "seed": 112358}
     time, out_one = inference_func(test_example)
     out_one = out_one[0]
     assert time < get_time_bound()
@@ -185,14 +173,14 @@ def test_determinism(inference_func):
     out_two = out_two[0]
     assert time_two < get_time_bound()
     assert out_one.size == (768, 1344)
-    
+
     one_array = np.array(out_one, dtype=np.uint16)
     two_array = np.array(out_two, dtype=np.uint16)
     assert np.allclose(one_array, two_array, atol=20)
 
 
 def test_resolutions(inference_func):
-    """changing resolutions - iterate through all resolutions and make sure that the output is """
+    """changing resolutions - iterate through all resolutions and make sure that the output is"""
     aspect_ratios = {
         "1:1": (1024, 1024),
         "16:9": (1344, 768),
@@ -206,12 +194,7 @@ def test_resolutions(inference_func):
     }
 
     for ratio, output in aspect_ratios.items():
-        test_example = {
-            'prompt': "A cool dog",
-            "aspect_ratio": ratio,
-            "num_outputs": 1,
-            "seed": 112358
-        }
+        test_example = {"prompt": "A cool dog", "aspect_ratio": ratio, "num_outputs": 1, "seed": 112358}
 
         time, img_out = inference_func(test_example)
         img_out = img_out[0]
@@ -223,11 +206,11 @@ def test_img2img(inference_func):
     """img2img. does it work?"""
     if not IS_DEV:
         assert True
-        return 
+        return
 
-    test_example= {
-        'prompt': 'a cool walrus',
-        'image': 'https://replicate.delivery/pbxt/IS6z50uYJFdFeh1vCmXe9zasYbG16HqOOMETljyUJ1hmlUXU/keanu.jpeg',
+    test_example = {
+        "prompt": "a cool walrus",
+        "image": "https://replicate.delivery/pbxt/IS6z50uYJFdFeh1vCmXe9zasYbG16HqOOMETljyUJ1hmlUXU/keanu.jpeg",
     }
 
     _, img_out = inference_func(test_example)

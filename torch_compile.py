@@ -1,4 +1,3 @@
-
 # Imports flux-schnell model from predict.py
 # from flux.util import load_flow_model
 # flux = load_flow_model("flux-schnell", device="cuda")

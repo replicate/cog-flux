@@ -10,6 +10,29 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        pip install ruff
+
+    - name: Run ruff linter
+      run: |
+        ruff check 
+
+    - name: Run ruff formatter
+      run: |
+        ruff format --diff 
+
   build-and-push:
     runs-on: ubuntu-latest
     if: ${{ !contains(github.event.head_commit.message, '[skip-cd]') }}
