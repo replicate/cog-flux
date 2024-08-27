@@ -121,6 +121,19 @@ def service():
         yield
 
 
+# things I would test: 
+#   standard generation for dev and schnell. assert that the output image has a dog in it with blip-2 or llava
+
+
+#   num_outputs = 4, assert time is about what you'd expect off of the prediction object
+
+
+#   determinism - test with the same seed twice
+
+
+#   changing resolutions - iterate through all resolutions and make sure that the output is valid
+
+
 def test_base_example(inference_func):
     test_example = {
         'image': 'https://replicate.delivery/pbxt/IS6z50uYJFdFeh1vCmXe9zasYbG16HqOOMETljyUJ1hmlUXU/keanu.jpeg',
