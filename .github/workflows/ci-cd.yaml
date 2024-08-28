@@ -1,0 +1,128 @@
+name: replicate-ci-cd
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        pip install ruff
+
+    - name: Run ruff linter
+      run: |
+        ruff check 
+
+    - name: Run ruff formatter
+      run: |
+        ruff format --diff 
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message, '[skip-cd]') }}
+    strategy:
+      matrix:
+        include:
+          - event: pull_request
+            model: 'dev', 'schnell'
+            env: 'test'
+          - event: push
+            model: 'dev', 'schnell'
+            env: 'prod'
+          - event: workflow_dispatch
+            model: 'dev', 'schnell'
+            env: 'prod'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Determine changes
+      id: what-changed
+      run: |
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          FILES_CHANGED=$(git diff --name-only --diff-filter=AMR origin/${{ github.base_ref }} HEAD)
+        else
+          FILES_CHANGED=$(git diff --name-only --diff-filter=AMR HEAD~1 HEAD)
+        fi
+        echo "FILES_CHANGED=$FILES_CHANGED" >> $GITHUB_ENV
+        if echo "$FILES_CHANGED" | grep -q 'cog.yaml' || ${{ contains(github.event.head_commit.message, '[cog build]') }}; then
+          echo "cog-push=true" >> $GITHUB_OUTPUT
+        else
+          echo "cog-push=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Setup Cog
+      if: steps.what-changed.outputs.cog-push == 'true'
+      uses: replicate/setup-cog@v2
+      with:
+        token: ${{ secrets.REPLICATE_API_TOKEN }}
+        install-cuda: false
+        cog-version: "v0.9.20"
+
+    - name: Free disk space
+      if: steps.what-changed.outputs.cog-push == 'true'
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: false
+        swap-storage: true
+
+    - name: Cog build and push
+      if: steps.what-changed.outputs.cog-push == 'true'
+      run: |
+        ./script/push.sh ${{ matrix.model }} ${{ matrix.env }}
+
+    - name: Install Yolo
+      if: steps.what-changed.outputs.cog-push == 'false'
+      run: |
+        sudo curl -o /usr/local/bin/yolo -L "https://github.com/replicate/yolo/releases/latest/download/yolo_$(uname -s)_$(uname -m)"
+        sudo chmod +x /usr/local/bin/yolo
+
+    - name: Yolo push
+      if: steps.what-changed.outputs.cog-push == 'false'
+      env:
+        REPLICATE_API_TOKEN: ${{secrets.REPLICATE_API_TOKEN}}
+      run: |
+        echo "pushing changes to ${{ matrix.model }}"
+        echo "changed files: $FILES_CHANGED"
+        yolo push --base ${{ matrix.model }} --dest ${{ matrix.model }} $FILES_CHANGED
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Python test dependencies
+      run: |
+        pip install -r requirements_test.txt
+
+    - name: Test model
+      env:
+        REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+        MODEL: ${{ matrix.model }}
+        TEST_ENV: ${{ matrix.env }}
+      run: |
+        ./script/test.sh ${{ matrix.model }} ${{ matrix.env }}

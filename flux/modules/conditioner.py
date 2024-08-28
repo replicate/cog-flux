@@ -10,10 +10,14 @@ class HFEmbedder(nn.Module):
         self.output_key = "pooler_output" if self.is_clip else "last_hidden_state"
 
         if self.is_clip:
-            self.tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(version + "/tokenizer", max_length=max_length)
+            self.tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(
+                version + "/tokenizer", max_length=max_length
+            )
             self.hf_module: CLIPTextModel = CLIPTextModel.from_pretrained(version + "/model", **hf_kwargs)
         else:
-            self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(version + "/tokenizer", max_length=max_length)
+            self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(
+                version + "/tokenizer", max_length=max_length
+            )
             self.hf_module: T5EncoderModel = T5EncoderModel.from_pretrained(version + "/model", **hf_kwargs)
 
         self.hf_module = self.hf_module.eval().requires_grad_(False)
