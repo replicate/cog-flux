@@ -381,3 +381,12 @@ class DevPredictor(Predictor):
             profile_torch=profile_torch,
             profile_python=profile_python,
         )
+
+class TestPredictor(Predictor):
+    """No-op predictor for spinning up debug deployment"""
+    def setup(self) -> None:
+        self.num=2
+
+    def predict(self,
+                how_many: int = Input(description="how many?")) -> int:
+        return self.num + how_many
