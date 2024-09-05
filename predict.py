@@ -73,7 +73,8 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name: str, compile: bool) -> None:
+    def base_setup(self, flow_model_name: str, compile: bool, channels_last: bool, attn_type: Optional[str]) -> None:
+        self.attn_type = attn_type
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -97,6 +98,9 @@ class Predictor(BasePredictor):
         self.clip = load_clip(device)
         self.flux = load_flow_model(self.flow_model_name, device="cpu" if self.offload else device)
         self.flux = self.flux.eval()
+        if channels_last:
+            print("channels last format")
+            self.flux = self.flux.to(memory_format=torch.channels_last)
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
@@ -232,7 +236,7 @@ class Predictor(BasePredictor):
             st = time.time()
 
         x, flux = denoise(
-            self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run
+            self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run, attn_type=self.attn_type
         )
 
         if self.compile_run:
@@ -336,8 +340,8 @@ class SchnellPredictor(Predictor):
 
 
 class DevPredictor(Predictor):
-    def setup(self) -> None:
-        self.base_setup("flux-dev", compile=True)
+    def setup(self, channels_last=False, attn_type=None) -> None:
+        self.base_setup("flux-dev", compile=True, channels_last=channels_last, attn_type=attn_type)
 
     @torch.inference_mode()
     def predict(
