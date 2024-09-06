@@ -4,6 +4,7 @@ from typing import Callable
 import torch
 from einops import rearrange, repeat
 from torch import Tensor
+from torchao import autoquant
 from tqdm.auto import tqdm
 
 from .model import Flux
@@ -116,7 +117,7 @@ def denoise_single_item(
     if compile_run: 
         torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
-        model = torch.compile(model)
+        model = autoquant(torch.compile(model))
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)

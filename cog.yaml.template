@@ -21,6 +21,8 @@ build:
     - "tokenizers==0.19.1"
     - "protobuf==5.27.2"
     - "diffusers==0.29.2"
+    - "torchao"
+
 
   # commands run after the environment is setup
   run:
