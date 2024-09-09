@@ -254,10 +254,11 @@ class Predictor(BasePredictor):
             self.ae.decoder.cpu()
             torch.cuda.empty_cache()
 
-        images = [Image.fromarray((127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy()) for i in range(num_outputs)]
+        np_images = [(127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy() for i in range(num_outputs)]
+        images = [Image.fromarray(img) for img in np_images]
         has_nsfw_content = [False] * len(images)
         if not disable_safety_checker:
-            _, has_nsfw_content = self.run_safety_checker(images) # always on gpu
+            _, has_nsfw_content = self.run_safety_checker(images, np_images) # always on gpu
 
         output_paths = []
         for i, (img, is_nsfw) in enumerate(zip(images, has_nsfw_content)):
@@ -282,9 +283,8 @@ class Predictor(BasePredictor):
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
         return output_paths
 
-    def run_safety_checker(self, images):
+    def run_safety_checker(self, images, np_images):
         safety_checker_input = self.feature_extractor(images, return_tensors="pt").to("cuda")
-        np_images = [np.array(img) for img in images]
         image, has_nsfw_concept = self.safety_checker(
             images=np_images,
             clip_input=safety_checker_input.pixel_values.to(torch.float16),
