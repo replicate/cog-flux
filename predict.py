@@ -263,7 +263,7 @@ class Predictor(BasePredictor):
         for i, (img, is_nsfw) in enumerate(zip(images, has_nsfw_content)):
             if is_nsfw:
                 try:
-                    falcon_is_safe = self.run_falcon_safety_checker(image)
+                    falcon_is_safe = self.run_falcon_safety_checker(img)
                 except Exception as e:
                     print(f"Error running safety checker: {e}")
                     falcon_is_safe = False
