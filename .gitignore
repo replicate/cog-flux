@@ -13,3 +13,6 @@ model-cache
 falcon-cache
 
 cog.yaml
+*.png
+*.webp
+*.jpg
