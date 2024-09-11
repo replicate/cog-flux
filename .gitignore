@@ -10,5 +10,9 @@ trained_model.tar
 __*.zip
 **-cache
 model-cache
+falcon-cache
 
 cog.yaml
+*.png
+*.webp
+*.jpg
