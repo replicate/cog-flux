@@ -340,7 +340,7 @@ class Predictor(BasePredictor):
             dtype=torch.bfloat16,
             seed=1,
         )
-        timesteps = get_schedule(4, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift)
+        timesteps = get_schedule(4, (x.shape[-1] * x.shape[-2]) // 4)
 
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt])
 
@@ -464,11 +464,14 @@ class DevPredictor(Predictor):
 
 if __name__ == "__main__":
     p = SchnellPredictor()
-    p.simple_predict("hi")
+    p.setup()
+    # p.simple_predict("hi")
+    p.base_predict("hi", "1:1", 1, "webp", "", False, num_inference_steps=4)
     times = []
     for i in range(10):
         st = time.time()
-        p.simple_predict("hi")
+        p.base_predict("hi", "1:1", 1, "webp", "", False)
+        # p.simple_predict("hi")
         times.append(time.time() - st)
     print(statistics.mean(times), statistics.median(times))
 
