@@ -1,3 +1,4 @@
+import cProfile
 import os
 import pickle
 import time
@@ -327,6 +328,7 @@ class Predictor(BasePredictor):
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
         return output_paths
 
+    @torch.inference_mode()
     def simple_predict(self, prompt: str) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -465,13 +467,15 @@ class DevPredictor(Predictor):
 if __name__ == "__main__":
     p = SchnellPredictor()
     p.setup()
-    # p.simple_predict("hi")
-    p.base_predict("hi", "1:1", 1, "webp", "", False, num_inference_steps=4)
+    p.simple_predict("hi")
+    #p.base_predict("hi", "1:1", 1, "webp", "", False, num_inference_steps=4)
     times = []
-    for i in range(10):
-        st = time.time()
-        p.base_predict("hi", "1:1", 1, "webp", "", False)
-        # p.simple_predict("hi")
-        times.append(time.time() - st)
+    with cProfile.Profile() as prof:
+        for i in range(10):
+            st = time.time()
+            #p.base_predict("hi", "1:1", 1, "webp", "", False)
+            p.simple_predict("hi")
+            times.append(time.time() - st)
+        prof.dump_stats("prof")
     print(statistics.mean(times), statistics.median(times))
 
