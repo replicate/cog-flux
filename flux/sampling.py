@@ -8,6 +8,7 @@ from tqdm.auto import tqdm
 
 from .model import Flux
 from .modules.conditioner import HFEmbedder
+from .delta_cache import DeltaCache
 
 
 def get_noise(
@@ -104,7 +105,9 @@ def denoise_single_item(
     vec: Tensor,
     timesteps: list[float],
     guidance: float = 4.0,
-    compile_run: bool = False
+    compile_run: bool = False,
+    double_stream_delta_cache: DeltaCache | None = None,
+    single_stream_delta_cache: DeltaCache | None = None,
 ):
     img = img.unsqueeze(0)
     img_ids = img_ids.unsqueeze(0)
@@ -113,14 +116,14 @@ def denoise_single_item(
     vec = vec.unsqueeze(0)
     guidance_vec = torch.full((1,), guidance, device=img.device, dtype=img.dtype)
 
-    if compile_run: 
-        torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
+    if compile_run:
+        torch._dynamo.mark_dynamic(img, 1, min=256, max=8100)  # needs at least torch 2.4
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
         model = torch.compile(model)
 
-    for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
+    for current_step, (t_curr, t_prev) in tqdm(enumerate(zip(timesteps[:-1], timesteps[1:]))):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
-        
+
         pred = model(
             img=img,
             img_ids=img_ids,
@@ -129,11 +132,15 @@ def denoise_single_item(
             y=vec,
             timesteps=t_vec,
             guidance=guidance_vec,
+            current_step=current_step,
+            double_stream_delta_cache=double_stream_delta_cache,
+            single_stream_delta_cache=single_stream_delta_cache,
         )
 
         img = img + (t_prev - t_curr) * pred.squeeze(0)
 
     return img, model
+
 
 def denoise(
     model: Flux,
@@ -146,7 +153,9 @@ def denoise(
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
-    compile_run: bool = False
+    compile_run: bool = False,
+    double_stream_delta_cache: DeltaCache | None = None,
+    single_stream_delta_cache: DeltaCache | None = None,
 ):
     batch_size = img.shape[0]
     output_imgs = []
@@ -161,12 +170,15 @@ def denoise(
             vec[i],
             timesteps,
             guidance,
-            compile_run
+            compile_run,
+            double_stream_delta_cache=double_stream_delta_cache,
+            single_stream_delta_cache=single_stream_delta_cache,
         )
         compile_run = False
         output_imgs.append(denoised_img)
-    
+
     return torch.cat(output_imgs), model
+
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
     return rearrange(

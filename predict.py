@@ -15,6 +15,7 @@ from einops import rearrange
 from torchvision import transforms
 from cog import BasePredictor, Input, Path
 from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
+from flux.delta_cache import DeltaCache
 
 from diffusers.pipelines.stable_diffusion.safety_checker import (
     StableDiffusionSafetyChecker,
@@ -49,6 +50,10 @@ class SharedInputs:
     disable_safety_checker: Input = Input(
             description="Disable safety checker for generated images.",
             default=False,
+    )
+    delta_dit_caching: Input = Input(
+        description="Use Δ-DiT caching for faster predictions with slightly degraded quality (https://arxiv.org/html/2406.01125v1#S4)",
+        default=False,
     )
 
 SHARED_INPUTS = SharedInputs()
@@ -103,7 +108,7 @@ class Predictor(BasePredictor):
                 seed=123
             )
 
-    
+
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         aspect_ratios = {
             "1:1": (1024, 1024),
@@ -117,7 +122,7 @@ class Predictor(BasePredictor):
             "9:21": (640, 1536),
         }
         return aspect_ratios.get(aspect_ratio)
-    
+
     def get_image(self, image: str):
         if image is None:
             return None
@@ -130,7 +135,7 @@ class Predictor(BasePredictor):
         )
         img: torch.Tensor = transform(image)
         return img[None, ...]
-    
+
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
 
@@ -147,6 +152,7 @@ class Predictor(BasePredictor):
         image: Path = None, # img2img for flux-dev
         prompt_strength: float = 0.8,
         seed: Optional[int] = None,
+        delta_dit_caching: bool = False
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -210,7 +216,27 @@ class Predictor(BasePredictor):
             print("Compiling")
             st = time.time()
 
-        x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run)
+        if delta_dit_caching:
+            cache_start_step = int(num_inference_steps * 0.35)
+            cache_end_step = int(num_inference_steps * 0.9)
+            double_stream_delta_cache = DeltaCache(
+                start_step = cache_start_step,
+                end_step = cache_end_step,
+                start_block = 0,
+                end_block = 19,
+                cache_interval = 2,
+            )
+            single_stream_delta_cache = DeltaCache(
+                start_step = cache_start_step,
+                end_step = cache_end_step,
+                start_block = 0,
+                end_block = 38,
+                cache_interval = 2,
+            )
+        else:
+            double_stream_delta_cache = single_stream_delta_cache = None
+
+        x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run, double_stream_delta_cache=double_stream_delta_cache, single_stream_delta_cache=single_stream_delta_cache)
 
         if self.compile_run:
             print(f"Compiled in {time.time() - st}")
@@ -221,7 +247,7 @@ class Predictor(BasePredictor):
             self.flux.cpu()
             torch.cuda.empty_cache()
             self.ae.decoder.to(x.device)
-        
+
         x = unpack(x.float(), height, width)
         with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
             x = self.ae.decode(x)
@@ -229,12 +255,12 @@ class Predictor(BasePredictor):
         if self.offload:
             self.ae.decoder.cpu()
             torch.cuda.empty_cache()
-            
+
         images = [Image.fromarray((127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy()) for i in range(num_outputs)]
         has_nsfw_content = [False] * len(images)
         if not disable_safety_checker:
             _, has_nsfw_content = self.run_safety_checker(images) # always on gpu
-            
+
         output_paths = []
         for i, (img, is_nsfw) in enumerate(zip(images, has_nsfw_content)):
             if is_nsfw:
@@ -251,7 +277,7 @@ class Predictor(BasePredictor):
 
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
         return output_paths
-    
+
     def run_safety_checker(self, images):
         safety_checker_input = self.feature_extractor(images, return_tensors="pt").to("cuda")
         np_images = [np.array(img) for img in images]
@@ -264,7 +290,7 @@ class Predictor(BasePredictor):
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-schnell", compile=False)
-    
+
     @torch.inference_mode()
     def predict(
         self,
@@ -272,18 +298,20 @@ class SchnellPredictor(Predictor):
         aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
         num_outputs: int = SHARED_INPUTS.num_outputs,
         seed: int = SHARED_INPUTS.seed,
+        delta_dit_caching: bool = SHARED_INPUTS.delta_dit_caching,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
     ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed)
-    
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed, delta_dit_caching=delta_dit_caching)
+
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev", compile=True)
-    
+        # self.base_setup("flux-dev", compile=True)
+        self.base_setup("flux-dev", compile=False)
+
     @torch.inference_mode()
     def predict(
         self,
@@ -297,9 +325,10 @@ class DevPredictor(Predictor):
         num_inference_steps: int = Input(description="Number of denoising steps. Recommended range is 28-50", ge=1, le=50, default=28),
         guidance: float = Input(description="Guidance for generated image", ge=0, le=10, default=3),
         seed: int = SHARED_INPUTS.seed,
+        delta_dit_caching: bool = SHARED_INPUTS.delta_dit_caching,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
     ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed)
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, delta_dit_caching=delta_dit_caching)

@@ -11,6 +11,7 @@ from flux.modules.layers import (
     SingleStreamBlock,
     timestep_embedding,
 )
+from flux.delta_cache import DeltaCache
 
 
 @dataclass
@@ -87,7 +88,10 @@ class Flux(nn.Module):
         txt_ids: Tensor,
         timesteps: Tensor,
         y: Tensor,
+        current_step: int,
         guidance: Tensor | None = None,
+        double_stream_delta_cache: DeltaCache | None = None,
+        single_stream_delta_cache: DeltaCache | None = None,
     ) -> Tensor:
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
@@ -95,6 +99,7 @@ class Flux(nn.Module):
         # running on sequences img
         img = self.img_in(img)
         vec = self.time_in(timestep_embedding(timesteps, 256))
+
         if self.params.guidance_embed:
             if guidance is None:
                 raise ValueError("Didn't get guidance strength for guidance distilled model.")
@@ -105,12 +110,33 @@ class Flux(nn.Module):
         ids = torch.cat((txt_ids, img_ids), dim=1)
         pe = self.pe_embedder(ids)
 
-        for block in self.double_blocks:
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+        for i, block in enumerate(self.double_blocks):
+            cached_output = None
+            if double_stream_delta_cache:
+                cached_output = double_stream_delta_cache.retrieve(i, (img, txt), current_step)
+            if cached_output is None:
+                img_input = img.clone()
+                txt_input = txt.clone()
+                img, txt = block(img, txt=txt, vec=vec, pe=pe)
+                if double_stream_delta_cache:
+                    double_stream_delta_cache.store(i, (img_input, txt_input), (img, txt), current_step)
+            else:
+                img, txt = cached_output
 
         img = torch.cat((txt, img), 1)
-        for block in self.single_blocks:
-            img = block(img, vec=vec, pe=pe)
+
+        for i, block in enumerate(self.single_blocks):
+            cached_output = None
+            if single_stream_delta_cache:
+                cached_output = single_stream_delta_cache.retrieve(i, img, current_step)
+            if cached_output is None:
+                img_input = img.clone()
+                img = block(img, vec=vec, pe=pe)
+                if single_stream_delta_cache:
+                    single_stream_delta_cache.store(i, img_input, img, current_step)
+            else:
+                img = cached_output
+
         img = img[:, txt.shape[1] :, ...]
 
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
