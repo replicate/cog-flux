@@ -41,12 +41,24 @@ FALCON_MODEL_URL = (
 logging.getLogger("diffusers").setLevel(logging.CRITICAL)
 logging.getLogger("transformers").setLevel(logging.CRITICAL)
 
+ASPECT_RATIOS = {
+    "1:1": (1024, 1024),
+    "16:9": (1344, 768),
+    "21:9": (1536, 640),
+    "3:2": (1216, 832),
+    "2:3": (832, 1216),
+    "4:5": (896, 1088),
+    "5:4": (1088, 896),
+    "9:16": (768, 1344),
+    "9:21": (640, 1536),
+}
+
 @dataclass
 class SharedInputs:
     prompt: Input = Input(description="Prompt for generated image")
     aspect_ratio: Input = Input(
             description="Aspect ratio for the generated image",
-            choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
+            choices=list(ASPECT_RATIOS.keys()),
             default="1:1")
     num_outputs: Input = Input(description="Number of outputs to generate", default=1, le=4, ge=1)
     seed: Input = Input(description="Random seed. Set for reproducible generation", default=None)
@@ -129,18 +141,7 @@ class Predictor(BasePredictor):
 
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
-        aspect_ratios = {
-            "1:1": (1024, 1024),
-            "16:9": (1344, 768),
-            "21:9": (1536, 640),
-            "3:2": (1216, 832),
-            "2:3": (832, 1216),
-            "4:5": (896, 1088),
-            "5:4": (1088, 896),
-            "9:16": (768, 1344),
-            "9:21": (640, 1536),
-        }
-        return aspect_ratios.get(aspect_ratio)
+        return ASPECT_RATIOS.get(aspect_ratio)
 
     def get_image(self, image: str):
         if image is None:
