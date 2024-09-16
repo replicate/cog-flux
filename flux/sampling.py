@@ -119,8 +119,8 @@ def denoise_single_item(
     if compile_run: 
         torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
+        model = model.to(memory_format=torch.channels_last)
         quantize_(model, float8_dynamic_activation_float8_weight(granularity=PerRow()))
-        #model = model.to(memory_format=torch.channels_last)
         model = torch.compile(model, mode="max-autotune", fullgraph=True)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):

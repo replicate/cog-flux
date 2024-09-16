@@ -1,9 +1,13 @@
 import os
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.benchmark_limit = 20
 
 from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
@@ -304,3 +308,14 @@ class DevPredictor(Predictor):
     ) -> List[Path]:
 
         return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed)
+    
+
+class TestPredictor(Predictor):
+    def setup(self) -> None:
+        self.num = 3
+
+    def predict(
+            self, 
+            how_many: int = Input(description="how many", ge=0)
+            ) -> Any:
+        return self.num + how_many

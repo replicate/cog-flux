@@ -36,8 +36,8 @@ fi
 # Conditional cog push based on environment
 if [ "$ENVIRONMENT" == "test" ]; then
     echo "Pushing to test environment"
-    cog push r8.im/replicate-internal/flux-$MODEL_NAME --use-cog-base-image=false
+    cog push r8.im/replicate-internal/flux-$MODEL_NAME 
 elif [ "$ENVIRONMENT" == "prod" ]; then
     echo "Pushing to production environment"
-    cog push r8.im/replicate/flux-$MODEL_NAME-internal-model --use-cog-base-image=false
+    cog push r8.im/replicate/flux-$MODEL_NAME-internal-model 
 fi
