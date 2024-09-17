@@ -81,7 +81,7 @@ class Flux(nn.Module):
 
     def forward(
         self,
-        img: Tensor,
+        img: Tensor, # (bs, dynamic, 64)
         img_ids: Tensor,
         txt: Tensor,
         txt_ids: Tensor,
@@ -93,7 +93,7 @@ class Flux(nn.Module):
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
 
         # running on sequences img
-        img = self.img_in(img)
+        img = self.img_in(img) # (bs, dynamic, hidden_size)
         vec = self.time_in(timestep_embedding(timesteps, 256))
         if self.params.guidance_embed:
             if guidance is None:

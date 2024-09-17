@@ -30,7 +30,9 @@ def get_noise(
     )
 
 
-def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[str]) -> dict[str, Tensor]:
+def prepare(
+    t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[str]
+) -> dict[str, Tensor]:
     bs, c, h, w = img.shape
     if bs == 1 and not isinstance(prompt, str):
         bs = len(prompt)
@@ -104,7 +106,7 @@ def denoise_single_item(
     vec: Tensor,
     timesteps: list[float],
     guidance: float = 4.0,
-    compile_run: bool = False
+    compile_run: bool = False,
 ):
     img = img.unsqueeze(0)
     img_ids = img_ids.unsqueeze(0)
@@ -127,14 +129,15 @@ def denoise_single_item(
             img_ids=img_ids,
             txt=txt,
             txt_ids=txt_ids,
-            y=vec,
             timesteps=t_vec,
+            y=vec,
             guidance=guidance_vec,
         )
 
         img = img + (t_prev - t_curr) * pred.squeeze(0)
 
     return img, model
+
 
 def denoise(
     model: Flux,
@@ -147,7 +150,7 @@ def denoise(
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
-    compile_run: bool = False
+    compile_run: bool = False,
 ):
     batch_size = img.shape[0]
     output_imgs = []
@@ -162,12 +165,13 @@ def denoise(
             vec[i],
             timesteps,
             guidance,
-            compile_run
+            compile_run,
         )
         compile_run = False
         output_imgs.append(denoised_img)
     
     return torch.cat(output_imgs), model
+
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
     return rearrange(
@@ -177,4 +181,4 @@ def unpack(x: Tensor, height: int, width: int) -> Tensor:
         w=math.ceil(width / 16),
         ph=2,
         pw=2,
-    )
+   )
