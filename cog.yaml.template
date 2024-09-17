@@ -4,13 +4,13 @@
 build:
   # set to true if your model requires a GPU
   gpu: true
-  cuda: "12.1"
+  cuda: "12.4"
 
   python_version: "3.11"
 
   python_packages:
     - "numpy<2"
-    - "torch==2.4"
+    - "torch==2.4.1"
     - "einops==0.8.0"
     - "fire >= 0.6.0"
     - "huggingface-hub==0.24.3"

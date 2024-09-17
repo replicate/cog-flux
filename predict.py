@@ -62,7 +62,7 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name: str, compile: bool) -> None:
+    def base_setup(self, flow_model_name: str) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -91,23 +91,6 @@ class Predictor(BasePredictor):
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
-        if compile:
-            torch._inductor.config.fallback_random = True
-            self.compile_run = True
-            self.predict(
-                prompt="a cool dog",
-                aspect_ratio="1:1",
-                image=None,
-                prompt_strength=1,
-                num_outputs=1,
-                num_inference_steps=self.num_steps,
-                guidance=3.5,
-                output_format='png',
-                output_quality=80,
-                disable_safety_checker=True,
-                seed=123
-            )
-
     
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         aspect_ratios = {
@@ -268,7 +251,17 @@ class Predictor(BasePredictor):
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell", compile=False)
+        self.base_setup("flux-schnell")
+        self.compile_run = True
+        self.predict(
+            prompt="a cool dog",
+            aspect_ratio="1:1",
+            num_outputs=1,
+            output_format='png',
+            output_quality=80,
+            disable_safety_checker=True,
+            seed=123
+        )
     
     @torch.inference_mode()
     def predict(
@@ -287,8 +280,22 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev", compile=True)
-    
+        self.base_setup("flux-dev")
+        self.compile_run = True
+        self.predict(
+            prompt="a cool dog",
+            aspect_ratio="1:1",
+            image=None,
+            prompt_strength=1,
+            num_outputs=1,
+            num_inference_steps=self.num_steps,
+            guidance=3.5,
+            output_format='png',
+            output_quality=80,
+            disable_safety_checker=True,
+            seed=123
+        )
+
     @torch.inference_mode()
     def predict(
         self,
