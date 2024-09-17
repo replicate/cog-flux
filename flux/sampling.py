@@ -116,7 +116,8 @@ def denoise_single_item(
     if compile_run: 
         torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
-        model = torch.compile(model)
+        options = {"timing_cache_path": "."}
+        model = torch.compile(model, backend="tensorrt")
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)

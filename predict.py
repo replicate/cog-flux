@@ -125,6 +125,7 @@ class Predictor(BasePredictor):
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
         if compile:
+            #self.ae = torch.compile(self.ae)
             torch._inductor.config.fallback_random = True
             self.compile_run = True
             self.predict(
