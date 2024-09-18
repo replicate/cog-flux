@@ -7,7 +7,7 @@ import torch
 class ImageEncoder:
 
     @torch.inference_mode()
-    def encode_torch(self, img: torch.Tensor, quality=95):
+    def encode_pil(self, img: torch.Tensor) -> Image:
         if img.ndim == 2:
             img = (
                 img[None]
@@ -29,7 +29,14 @@ class ImageEncoder:
 
         img = img.cpu().numpy().astype(np.uint8)
         im = Image.fromarray(img)
+        return im
+
+    @torch.inference_mode()
+    def encode_torch(self, img: torch.Tensor, quality=95):
+        im = self.encode_pil(img)
         iob = io.BytesIO()
         im.save(iob, format="JPEG", quality=quality)
         iob.seek(0)
         return iob
+
+

@@ -145,9 +145,6 @@ class Predictor(BasePredictor):
         prompt: str,
         aspect_ratio: str,
         num_outputs: int,
-        output_format: str,
-        output_quality: int,
-        disable_safety_checker: bool,
         num_inference_steps: int,
         guidance: float = 3.5, # schnell ignores guidance within the model, fine to have default
         image: Path = None, # img2img for flux-dev
@@ -250,6 +247,9 @@ class Predictor(BasePredictor):
             torch.cuda.empty_cache()
             
         images = [Image.fromarray((127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy()) for i in range(num_outputs)]
+        return images
+    
+    def postprocess(self, images: List[Image], disable_safety_checker: bool, output_format: str, output_quality: int, profile: bool) -> List[Path]:
         has_nsfw_content = [False] * len(images)
         if not disable_safety_checker:
             _, has_nsfw_content = self.run_safety_checker(images) # always on gpu
@@ -287,15 +287,12 @@ class Predictor(BasePredictor):
             prompt: str,
             aspect_ratio: str,
             num_outputs: int,
-            output_format: str,
-            output_quality: int,
-            disable_safety_checker: bool,
             num_inference_steps: int,
             guidance: float = 3.5, # schnell ignores guidance within the model, fine to have default
             image: Path = None, # img2img for flux-dev
             prompt_strength: float = 0.8,
             seed: Optional[int] = None,
-            profile: bool = None):
+            profile: bool = None) -> List[Image]:
         """Run a single prediction on the model"""
         if seed is None:
             seed = np.random.randint(1, 100000)
@@ -303,7 +300,7 @@ class Predictor(BasePredictor):
         width, height = self.aspect_ratio_to_width_height(aspect_ratio)
         if image:
             image = Image.open(image).convert("RGB")
-        output_jpeg_bytes = self.fp8_pipe.generate(
+        output_pil_img = self.fp8_pipe.generate(
             prompt=prompt,
             width=width,
             height=height,
@@ -315,11 +312,7 @@ class Predictor(BasePredictor):
             profiling=profile
         )
 
-        with open("output.jpg", "wb") as f:
-            f.write(output_jpeg_bytes.getvalue())
-        
-        to_return = [Path("output.jpg")]
-        return to_return
+        return [output_pil_img]
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
@@ -350,9 +343,11 @@ class SchnellPredictor(Predictor):
     ) -> List[Path]:
         
         if float_8:
-            return self.fp8_predict
+            imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed, profile=profile)
         else:
-            return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed, profile=profile)
+            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed, profile=profile)
+        
+        return self.postprocess(imgs, output_format, output_quality, disable_safety_checker, profile)
     
 
 class DevPredictor(Predictor):
@@ -394,9 +389,11 @@ class DevPredictor(Predictor):
     ) -> List[Path]:
         
         if float_8:
-            return self.fp8_predict
+            imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed, profile=profile)
         else:
-            return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, profile=profile)
+            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, profile=profile)
+
+        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, profile)
     
 
 class TestPredictor(Predictor):

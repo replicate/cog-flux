@@ -389,6 +389,32 @@ class FluxPipeline:
         im = self.img_encoder.encode_torch(im, quality=jpeg_quality)
         images.clear()
         return im
+    
+    @torch.inference_mode()
+    def as_pil(self, x: torch.Tensor) -> io.BytesIO:
+        """Converts the image tensor to bytes."""
+        # bring into PIL format and save
+        num_images = x.shape[0]
+        images: List[torch.Tensor] = []
+        for i in range(num_images):
+            x = (
+                x[i]
+                .clamp(-1, 1)
+                .add(1.0)
+                .mul(127.5)
+                .clamp(0, 255)
+                .contiguous()
+                .type(torch.uint8)
+            )
+            images.append(x)
+        if len(images) == 1:
+            im = images[0]
+        else:
+            im = torch.vstack(images)
+
+        im = self.img_encoder.encode_pil(im)
+        images.clear()
+        return im
 
     @torch.inference_mode()
     def load_init_image_if_needed(
@@ -703,7 +729,7 @@ class FluxPipeline:
         # decode latents to pixel space
         img = self.vae_decode(img, height, width)
 
-        return self.into_bytes(img, jpeg_quality=jpeg_quality)
+        return self.as_pil(img)
 
     @classmethod
     def load_pipeline_from_config_path(
