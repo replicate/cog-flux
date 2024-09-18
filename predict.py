@@ -135,12 +135,13 @@ class Predictor(BasePredictor):
         image: Path = None, # img2img for flux-dev
         prompt_strength: float = 0.8,
         seed: Optional[int] = None,
+        profile: bool = None
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
         init_image = None
         width, height = self.aspect_ratio_to_width_height(aspect_ratio)
-        if compile_run:
+        if self.compile_run:
             width = MAX_IMAGE_SIZE
             height = MAX_IMAGE_SIZE
 
@@ -201,7 +202,19 @@ class Predictor(BasePredictor):
             print("Compiling")
             st = time.time()
 
-        x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run)
+        if profile: 
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as p:
+                x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run)
+
+            p.export_chrome_trace("trace.json")
+        else:
+            x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run)
+
 
         if self.compile_run:
             print(f"Compiled in {time.time() - st}")
@@ -241,6 +254,8 @@ class Predictor(BasePredictor):
             raise Exception("All generated images contained NSFW content. Try running it again with a different prompt.")
 
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
+        if profile:
+            output_paths.append("trace.json")
         return output_paths
     
     def run_safety_checker(self, images):
@@ -276,9 +291,10 @@ class SchnellPredictor(Predictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+        profile: bool = Input(description="torch profile", default=False)
     ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed)
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed, profile=profile)
     
 
 class DevPredictor(Predictor):
@@ -315,9 +331,10 @@ class DevPredictor(Predictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+        profile: bool = Input(description="torch profile", default=False)
     ) -> List[Path]:
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed)
+        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, profile=profile)
     
 
 class TestPredictor(Predictor):
