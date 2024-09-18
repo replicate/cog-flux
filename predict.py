@@ -141,9 +141,6 @@ class Predictor(BasePredictor):
         torch_device = torch.device("cuda")
         init_image = None
         width, height = self.aspect_ratio_to_width_height(aspect_ratio)
-        if self.compile_run:
-            width = MAX_IMAGE_SIZE
-            height = MAX_IMAGE_SIZE
 
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
