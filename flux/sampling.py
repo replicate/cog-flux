@@ -4,9 +4,6 @@ from typing import Callable
 import torch
 from einops import rearrange, repeat
 from torch import Tensor
-from torchao import autoquant
-from torchao.quantization import float8_dynamic_activation_float8_weight, quantize_
-from torchao.quantization.quant_api import PerRow
 from tqdm.auto import tqdm
 
 from .model import Flux
@@ -120,7 +117,6 @@ def denoise_single_item(
         torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
         model = model.to(memory_format=torch.channels_last)
-        quantize_(model, float8_dynamic_activation_float8_weight(granularity=PerRow()))
         model = torch.compile(model)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):

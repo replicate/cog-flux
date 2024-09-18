@@ -27,4 +27,3 @@ build:
     - curl -o /usr/local/bin/pget -L "https://github.com/replicate/pget/releases/download/v0.8.2/pget_linux_x86_64" && chmod +x /usr/local/bin/pget
     - pip uninstall -y torch torchvision torchaudio
     - pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu124
-    - pip install --pre torchao --index-url https://download.pytorch.org/whl/nightly/cu124
