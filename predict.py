@@ -255,7 +255,7 @@ class Predictor(BasePredictor):
 
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
         if profile:
-            output_paths.append("trace.json")
+            output_paths.append(Path("trace.json"))
         return output_paths
     
     def run_safety_checker(self, images):

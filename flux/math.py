@@ -1,12 +1,15 @@
 import torch
 from einops import rearrange
 from torch import Tensor
+from torch.nn.attention import SDPBackend, sdpa_kernel
+
 
 
 def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor) -> Tensor:
     q, k = apply_rope(q, k, pe)
-
-    x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+    # Only enable flash attention backend
+    with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+        x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
     x = rearrange(x, "B H L D -> B L (H D)")
 
     return x
