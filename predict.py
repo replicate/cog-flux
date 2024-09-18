@@ -315,6 +315,7 @@ class Predictor(BasePredictor):
         width, height = self.aspect_ratio_to_width_height(aspect_ratio)
         if image:
             image = Image.open(image).convert("RGB")
+        print("generating")
         output_pil_img = self.fp8_pipe.generate(
             prompt=prompt,
             width=width,
@@ -410,7 +411,7 @@ class DevPredictor(Predictor):
         if float_8:
             imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed, profile=profile)
         else:
-            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, output_format=output_format, output_quality=output_quality, disable_safety_checker=disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, profile=profile)
+            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed, profile=profile)
 
         return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, profile)
     
