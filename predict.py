@@ -99,15 +99,29 @@ class Predictor(BasePredictor):
         self.compile_run = False
 
         shared_models = LoadedModels(
+            flow = None,
             ae = self.ae,
             clip = self.clip,
-            t5 = self.t5
+            t5 = self.t5,
+            config = None
         )
 
         self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
             f"configs/config-1-{flow_model_name}-h100.json", 
-            shared_models
+            shared_models=shared_models
         )
+
+        # print("compiling")
+        # self.fp8_pipe.generate(
+        #     prompt="a cool dog",
+        #     width=1344,
+        #     height=768,
+        #     num_steps=28,
+        #     guidance=3,
+        #     seed=123,
+        #     compiling=compile
+        # )
+        # print("compiled")
 
     
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
@@ -294,6 +308,7 @@ class Predictor(BasePredictor):
             seed: Optional[int] = None,
             profile: bool = None) -> List[Image]:
         """Run a single prediction on the model"""
+        print("running quantized prediction") 
         if seed is None:
             seed = np.random.randint(1, 100000)
 
@@ -317,16 +332,16 @@ class Predictor(BasePredictor):
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-schnell")
-        self.compile_run = True
-        self.predict(
-            prompt="a cool dog",
-            aspect_ratio="1:1",
-            num_outputs=1,
-            output_format='png',
-            output_quality=80,
-            disable_safety_checker=True,
-            seed=123
-        )
+        # self.compile_run = True
+        # self.predict(
+        #     prompt="a cool dog",
+        #     aspect_ratio="1:1",
+        #     num_outputs=1,
+        #     output_format='png',
+        #     output_quality=80,
+        #     disable_safety_checker=True,
+        #     seed=123
+        # )
     
     @torch.inference_mode()
     def predict(
@@ -353,20 +368,20 @@ class SchnellPredictor(Predictor):
 class DevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-dev")
-        self.compile_run = True
-        self.predict(
-            prompt="a cool dog",
-            aspect_ratio="1:1",
-            image=None,
-            prompt_strength=1,
-            num_outputs=1,
-            num_inference_steps=self.num_steps,
-            guidance=3.5,
-            output_format='png',
-            output_quality=80,
-            disable_safety_checker=True,
-            seed=123
-        )
+        # self.compile_run = True
+        # self.predict(
+        #     prompt="a cool dog",
+        #     aspect_ratio="1:1",
+        #     image=None,
+        #     prompt_strength=1,
+        #     num_outputs=1,
+        #     num_inference_steps=self.num_steps,
+        #     guidance=3.5,
+        #     output_format='png',
+        #     output_quality=80,
+        #     disable_safety_checker=True,
+        #     seed=123
+        # )
 
     @torch.inference_mode()
     def predict(
@@ -388,10 +403,14 @@ class DevPredictor(Predictor):
         float_8: bool = SHARED_INPUTS.float_8
     ) -> List[Path]:
         
+        if image and float_8:
+            print("img2img not supported with fp8 quantization; running with bf16")
+            float_8 = False
+        
         if float_8:
             imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed, profile=profile)
         else:
-            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, profile=profile)
+            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, output_format=output_format, output_quality=output_quality, disable_safety_checker=disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, profile=profile)
 
         return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, profile)
     
