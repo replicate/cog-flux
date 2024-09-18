@@ -57,6 +57,10 @@ class SharedInputs:
             description="Disable safety checker for generated images.",
             default=False,
     )
+    float_8: Input = Input(
+        description="Run faster predictions with fp8 quantized model; disable to run in original bf16",
+        default=True
+    )
 
 SHARED_INPUTS = SharedInputs()
 
@@ -277,6 +281,45 @@ class Predictor(BasePredictor):
             clip_input=safety_checker_input.pixel_values.to(torch.float16),
         )
         return image, has_nsfw_concept
+    
+    def fp8_predict(    
+            self,    
+            prompt: str,
+            aspect_ratio: str,
+            num_outputs: int,
+            output_format: str,
+            output_quality: int,
+            disable_safety_checker: bool,
+            num_inference_steps: int,
+            guidance: float = 3.5, # schnell ignores guidance within the model, fine to have default
+            image: Path = None, # img2img for flux-dev
+            prompt_strength: float = 0.8,
+            seed: Optional[int] = None,
+            profile: bool = None):
+        """Run a single prediction on the model"""
+        if seed is None:
+            seed = np.random.randint(1, 100000)
+
+        width, height = self.aspect_ratio_to_width_height(aspect_ratio)
+        if image:
+            image = Image.open(image).convert("RGB")
+        output_jpeg_bytes = self.fp8_pipe.generate(
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_steps=num_inference_steps,
+            guidance=guidance,
+            seed=seed,
+            init_image=image,
+            strength=prompt_strength,
+            profiling=profile
+        )
+
+        with open("output.jpg", "wb") as f:
+            f.write(output_jpeg_bytes.getvalue())
+        
+        to_return = [Path("output.jpg")]
+        return to_return
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
@@ -302,10 +345,14 @@ class SchnellPredictor(Predictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        profile: bool = Input(description="torch profile", default=False)
+        profile: bool = Input(description="torch profile", default=False),
+        float_8: bool = SHARED_INPUTS.float_8
     ) -> List[Path]:
-
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed, profile=profile)
+        
+        if float_8:
+            return self.fp8_predict
+        else:
+            return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed, profile=profile)
     
 
 class DevPredictor(Predictor):
@@ -342,10 +389,14 @@ class DevPredictor(Predictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        profile: bool = Input(description="torch profile", default=False)
+        profile: bool = Input(description="torch profile", default=False),
+        float_8: bool = SHARED_INPUTS.float_8
     ) -> List[Path]:
-
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, profile=profile)
+        
+        if float_8:
+            return self.fp8_predict
+        else:
+            return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed, profile=profile)
     
 
 class TestPredictor(Predictor):
