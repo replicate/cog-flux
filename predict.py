@@ -11,6 +11,8 @@ torch.backends.cudnn.benchmark_limit = 20
 
 from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
+from flux_pipeline import FluxPipeline
+from util import LoadedModels
 
 import numpy as np
 from einops import rearrange
@@ -91,6 +93,18 @@ class Predictor(BasePredictor):
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
+
+        shared_models = LoadedModels(
+            ae = self.ae,
+            clip = self.clip,
+            t5 = self.t5
+        )
+
+        self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
+            f"configs/config-1-{flow_model_name}-h100.json", 
+            shared_models
+        )
+
     
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         aspect_ratios = {
