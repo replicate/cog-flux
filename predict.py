@@ -57,8 +57,8 @@ class SharedInputs:
             description="Disable safety checker for generated images.",
             default=False,
     )
-    float_8: Input = Input(
-        description="Run faster predictions with fp8 quantized model; disable to run in original bf16",
+    go_fast: Input = Input(
+        description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
         default=True
     )
 
@@ -111,17 +111,18 @@ class Predictor(BasePredictor):
             shared_models=shared_models
         )
 
-        # print("compiling")
-        # self.fp8_pipe.generate(
-        #     prompt="a cool dog",
-        #     width=1344,
-        #     height=768,
-        #     num_steps=28,
-        #     guidance=3,
-        #     seed=123,
-        #     compiling=compile
-        # )
-        # print("compiled")
+        print("compiling")
+        st = time.time()
+        self.fp8_pipe.generate(
+            prompt="a cool dog",
+            width=1344,
+            height=768,
+            num_steps=28,
+            guidance=3,
+            seed=123,
+            compiling=compile,
+        )
+        print("compiled in ", time.time() - st)
 
     
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
@@ -154,6 +155,7 @@ class Predictor(BasePredictor):
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
 
+    @torch.inference_mode()
     def base_predict(
         self,
         prompt: str,
@@ -333,6 +335,8 @@ class Predictor(BasePredictor):
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-schnell")
+
+        # this is how we compile the bf16 model
         # self.compile_run = True
         # self.predict(
         #     prompt="a cool dog",
@@ -344,7 +348,6 @@ class SchnellPredictor(Predictor):
         #     seed=123
         # )
     
-    @torch.inference_mode()
     def predict(
         self,
         prompt: str = SHARED_INPUTS.prompt,
@@ -355,10 +358,10 @@ class SchnellPredictor(Predictor):
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
         profile: bool = Input(description="torch profile", default=False),
-        float_8: bool = SHARED_INPUTS.float_8
+        go_fast: bool = SHARED_INPUTS.go_fast
     ) -> List[Path]:
         
-        if float_8:
+        if go_fast:
             imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed, profile=profile)
         else:
             imgs = self.base_predict(prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed, profile=profile)
@@ -369,6 +372,8 @@ class SchnellPredictor(Predictor):
 class DevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-dev")
+
+        # this is how we compile the bf16 model
         # self.compile_run = True
         # self.predict(
         #     prompt="a cool dog",
@@ -384,7 +389,6 @@ class DevPredictor(Predictor):
         #     seed=123
         # )
 
-    @torch.inference_mode()
     def predict(
         self,
         prompt: str = SHARED_INPUTS.prompt,
@@ -401,14 +405,14 @@ class DevPredictor(Predictor):
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
         profile: bool = Input(description="torch profile", default=False),
-        float_8: bool = SHARED_INPUTS.float_8
+        go_fast: bool = SHARED_INPUTS.go_fast
     ) -> List[Path]:
         
-        if image and float_8:
+        if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
-            float_8 = False
-        
-        if float_8:
+            go_fast = False
+            
+        if go_fast:
             imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed, profile=profile)
         else:
             imgs = self.base_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed, profile=profile)
