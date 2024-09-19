@@ -125,23 +125,27 @@ class Predictor(BasePredictor):
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
         if compile:
-            #self.ae = torch.compile(self.ae)
+            # self.ae = torch.compile(self.ae)
             torch._inductor.config.fallback_random = True
             self.compile_run = True
-            self.predict(
+            args = dict(
                 prompt="a cool dog",
                 aspect_ratio="1:1",
-                image=None,
-                prompt_strength=1,
                 num_outputs=1,
                 num_inference_steps=self.num_steps,
                 guidance=3.5,
-                output_format='png',
+                output_format="png",
                 output_quality=80,
                 disable_safety_checker=True,
-                seed=123
+                seed=123,
             )
+            if self.flow_model_name == "flux-dev":
+                args.update(
+                    image=None,
+                    prompt_strength=1,
+                )
 
+            self.predict(**args)
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         return ASPECT_RATIOS.get(aspect_ratio)
