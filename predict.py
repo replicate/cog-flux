@@ -151,11 +151,23 @@ class Predictor(BasePredictor):
             prompt="a cool dog",
             width=1344,
             height=768,
-            num_steps=28,
+            num_steps=self.num_steps,
             guidance=3,
             seed=123,
             compiling=compile,
         )
+
+        for k in ASPECT_RATIOS.keys():
+            print(f"warming kernel for {k}")
+            width, height = self.aspect_ratio_to_width_height(k)
+            self.fp8_pipe.generate(
+                prompt="godzilla!",
+                width=width,
+                height=height,
+                num_steps=4,
+                guidance=3
+            )
+
         print("compiled in ", time.time() - st)
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
