@@ -20,7 +20,6 @@ import numpy as np
 from einops import rearrange
 from PIL import Image
 from typing import List
-from einops import rearrange
 from torchvision import transforms
 from cog import BasePredictor, Input, Path
 from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
@@ -34,13 +33,13 @@ from transformers import (
     ViTImageProcessor,
 )
 
-SAFETY_CACHE = "./safety-cache"
-FEATURE_EXTRACTOR = "/src/feature-extractor"
+SAFETY_CACHE = Path("/src/safety-cache")
+FEATURE_EXTRACTOR = Path("/src/feature-extractor")
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
 MAX_IMAGE_SIZE = 1440
 
 FALCON_MODEL_NAME = "Falconsai/nsfw_image_detection"
-FALCON_MODEL_CACHE = "falcon-cache"
+FALCON_MODEL_CACHE = Path("/src/falcon-cache")
 FALCON_MODEL_URL = (
     "https://weights.replicate.delivery/default/falconai/nsfw-image-detection.tar"
 )
@@ -63,15 +62,21 @@ ASPECT_RATIOS = {
     "9:21": (640, 1536),
 }
 
+
 @dataclass
 class SharedInputs:
     prompt: Input = Input(description="Prompt for generated image")
     aspect_ratio: Input = Input(
-            description="Aspect ratio for the generated image",
-            choices=list(ASPECT_RATIOS.keys()),
-            default="1:1")
-    num_outputs: Input = Input(description="Number of outputs to generate", default=1, le=4, ge=1)
-    seed: Input = Input(description="Random seed. Set for reproducible generation", default=None)
+        description="Aspect ratio for the generated image",
+        choices=list(ASPECT_RATIOS.keys()),
+        default="1:1",
+    )
+    num_outputs: Input = Input(
+        description="Number of outputs to generate", default=1, le=4, ge=1
+    )
+    seed: Input = Input(
+        description="Random seed. Set for reproducible generation", default=None
+    )
     output_format: Input = Input(
         description="Format of the output images",
         choices=["webp", "jpg", "png"],
@@ -104,10 +109,14 @@ class Predictor(BasePredictor):
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
-        gpu_name = os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits").read().strip()
+        gpu_name = (
+            os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits")
+            .read()
+            .strip()
+        )
         print("Detected GPU:", gpu_name)
 
-        if not os.path.exists(SAFETY_CACHE):
+        if not SAFETY_CACHE.exists():
             download_weights(SAFETY_URL, SAFETY_CACHE)
         print("Loading Safety Checker to GPU")
         self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
@@ -116,7 +125,7 @@ class Predictor(BasePredictor):
         self.feature_extractor = CLIPImageProcessor.from_pretrained(FEATURE_EXTRACTOR)
 
         print("Loading Falcon safety checker...")
-        if not os.path.exists(FALCON_MODEL_CACHE):
+        if not FALCON_MODEL_CACHE.exists():
             download_weights(FALCON_MODEL_URL, FALCON_MODEL_CACHE)
         self.falcon_model = AutoModelForImageClassification.from_pretrained(
             FALCON_MODEL_NAME,
@@ -131,15 +140,21 @@ class Predictor(BasePredictor):
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
-        self.flux = load_flow_model(self.flow_model_name, device="cpu" if self.offload else device)
+        self.flux = load_flow_model(
+            self.flow_model_name, device="cpu" if self.offload else device
+        )
         self.flux = self.flux.eval()
-        self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
+        self.ae = load_ae(
+            self.flow_model_name, device="cpu" if self.offload else device
+        )
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
 
-        shared_models = LoadedModels(flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None)
+        shared_models = LoadedModels(
+            flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
+        )
 
         self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
             f"configs/config-1-{flow_model_name}-h100.json", shared_models=shared_models
@@ -157,15 +172,11 @@ class Predictor(BasePredictor):
             compiling=compile,
         )
 
-        for k in ASPECT_RATIOS.keys():
+        for k in ASPECT_RATIOS:
             print(f"warming kernel for {k}")
             width, height = self.aspect_ratio_to_width_height(k)
             self.fp8_pipe.generate(
-                prompt="godzilla!",
-                width=width,
-                height=height,
-                num_steps=4,
-                guidance=3
+                prompt="godzilla!", width=width, height=height, num_steps=4, guidance=3
             )
 
         print("compiled in ", time.time() - st)
@@ -242,8 +253,17 @@ class Predictor(BasePredictor):
                 torch.cuda.empty_cache()
 
         # prepare input
-        x = get_noise(num_outputs, height, width, device=torch_device, dtype=torch.bfloat16, seed=seed)
-        timesteps = get_schedule(num_inference_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift)
+        x = get_noise(
+            num_outputs,
+            height,
+            width,
+            device=torch_device,
+            dtype=torch.bfloat16,
+            seed=seed,
+        )
+        timesteps = get_schedule(
+            num_inference_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift
+        )
 
         if init_image is not None:
             t_idx = int((1.0 - prompt_strength) * num_inference_steps)
@@ -272,13 +292,21 @@ class Predictor(BasePredictor):
                 ]
             ) as p:
                 x, flux = denoise(
-                    self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run
+                    self.flux,
+                    **inp,
+                    timesteps=timesteps,
+                    guidance=guidance,
+                    compile_run=self.compile_run,
                 )
 
             p.export_chrome_trace("trace.json")
         else:
             x, flux = denoise(
-                self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run
+                self.flux,
+                **inp,
+                timesteps=timesteps,
+                guidance=guidance,
+                compile_run=self.compile_run,
             )
 
         if self.compile_run:
@@ -299,10 +327,16 @@ class Predictor(BasePredictor):
             self.ae.decoder.cpu()
             torch.cuda.empty_cache()
 
-        np_images = [(127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy() for i in range(num_outputs)]
+        np_images = [
+            (127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0))
+            .cpu()
+            .byte()
+            .numpy()
+            for i in range(num_outputs)
+        ]
         images = [Image.fromarray(img) for img in np_images]
         return images, np_images
-    
+
     def fp8_predict(
         self,
         prompt: str,
@@ -323,7 +357,7 @@ class Predictor(BasePredictor):
         if image:
             image = Image.open(image).convert("RGB")
         print("generating")
-        
+
         return self.fp8_pipe.generate(
             prompt=prompt,
             width=width,
@@ -333,7 +367,7 @@ class Predictor(BasePredictor):
             seed=seed,
             init_image=image,
             strength=prompt_strength,
-            num_images=num_outputs
+            num_images=num_outputs,
         )
 
     def postprocess(
@@ -366,7 +400,11 @@ class Predictor(BasePredictor):
                     continue
 
             output_path = f"out-{i}.{output_format}"
-            save_params = {"quality": output_quality, "optimize": True} if output_format != "png" else {}
+            save_params = (
+                {"quality": output_quality, "optimize": True}
+                if output_format != "png"
+                else {}
+            )
             img.save(output_path, **save_params)
             output_paths.append(Path(output_path))
 
@@ -381,13 +419,15 @@ class Predictor(BasePredictor):
         return output_paths
 
     def run_safety_checker(self, images, np_images):
-        safety_checker_input = self.feature_extractor(images, return_tensors="pt").to("cuda")
+        safety_checker_input = self.feature_extractor(images, return_tensors="pt").to(
+            "cuda"
+        )
         image, has_nsfw_concept = self.safety_checker(
             images=np_images,
             clip_input=safety_checker_input.pixel_values.to(torch.float16),
         )
         return image, has_nsfw_concept
-    
+
     def run_falcon_safety_checker(self, image):
         with torch.no_grad():
             inputs = self.falcon_processor(images=image, return_tensors="pt")
@@ -428,14 +468,28 @@ class SchnellPredictor(Predictor):
     ) -> List[Path]:
         if go_fast:
             imgs, np_imgs = self.fp8_predict(
-                prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed
+                prompt,
+                aspect_ratio,
+                num_outputs,
+                num_inference_steps=self.num_steps,
+                seed=seed,
             )
         else:
             imgs, np_imgs = self.base_predict(
-                prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed
+                prompt,
+                aspect_ratio,
+                num_outputs,
+                num_inference_steps=self.num_steps,
+                seed=seed,
             )
 
-        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, np_images=np_imgs)
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
 
 
 class DevPredictor(Predictor):
@@ -474,9 +528,14 @@ class DevPredictor(Predictor):
         ),
         num_outputs: int = SHARED_INPUTS.num_outputs,
         num_inference_steps: int = Input(
-            description="Number of denoising steps. Recommended range is 28-50", ge=1, le=50, default=28
+            description="Number of denoising steps. Recommended range is 28-50",
+            ge=1,
+            le=50,
+            default=28,
         ),
-        guidance: float = Input(description="Guidance for generated image", ge=0, le=10, default=3),
+        guidance: float = Input(
+            description="Guidance for generated image", ge=0, le=10, default=3
+        ),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
@@ -510,7 +569,13 @@ class DevPredictor(Predictor):
                 seed=seed,
             )
 
-        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, np_images=np_imgs)
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
 
 
 class TestPredictor(Predictor):

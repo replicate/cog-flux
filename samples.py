@@ -9,6 +9,7 @@ Then, in a separate terminal, generate samples
 import base64
 import sys
 import time
+from pathlib import Path
 import requests
 
 
@@ -30,11 +31,10 @@ def gen(output_fn, **kwargs):
         print(data["logs"])
         sys.exit(1)
 
-    with open(output_fn, "wb") as f:
-        f.write(data)
+    Path(output_fn).write_bytes(data)
 
 
-def test_fp8_and_bf16(): 
+def test_fp8_and_bf16():
     """
     runs generations in fp8 and bf16 on the same node! wow!
     """
@@ -46,7 +46,7 @@ def test_fp8_and_bf16():
         output_format="png",
         disable_safety_checker=True,
         seed=123,
-        float_8=True
+        float_8=True,
     )
 
     gen(
@@ -57,7 +57,7 @@ def test_fp8_and_bf16():
         output_format="png",
         disable_safety_checker=True,
         seed=123,
-        float_8=False
+        float_8=False,
     )
 
     gen(
@@ -68,7 +68,7 @@ def test_fp8_and_bf16():
         output_format="png",
         disable_safety_checker=True,
         seed=1231,
-        float_8=True
+        float_8=True,
     )
 
     gen(
@@ -79,10 +79,9 @@ def test_fp8_and_bf16():
         output_format="png",
         disable_safety_checker=True,
         seed=1231,
-        float_8=False
+        float_8=False,
     )
 
 
-
 if __name__ == "__main__":
-    main()
+    test_fp8_and_bf16()

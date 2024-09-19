@@ -5,7 +5,6 @@ import torch
 
 
 class ImageEncoder:
-
     @torch.inference_mode()
     def encode_pil(self, img: torch.Tensor) -> Image:
         if img.ndim == 2:
@@ -28,8 +27,7 @@ class ImageEncoder:
             raise ValueError(f"Unsupported image num dims: {img.ndim}")
 
         img = img.cpu().numpy().astype(np.uint8)
-        im = Image.fromarray(img)
-        return im
+        return Image.fromarray(img)
 
     @torch.inference_mode()
     def encode_torch(self, img: torch.Tensor, quality=95):
@@ -38,5 +36,3 @@ class ImageEncoder:
         im.save(iob, format="JPEG", quality=quality)
         iob.seek(0)
         return iob
-
-
