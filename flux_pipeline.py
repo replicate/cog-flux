@@ -13,9 +13,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 import torch
-from einops import rearrange
-
-from flux_emphasis import get_weighted_text_embeddings_flux
+from einops import rearrange, repeat
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -289,15 +287,17 @@ class FluxPipeline:
             self.t5.to(device=self.device_t5)
 
         # get the text embeddings
-        vec, txt, txt_ids = get_weighted_text_embeddings_flux(
-            self,
-            prompt,
-            num_images_per_prompt=bs,
-            device=self.device_clip,
-            target_device=target_device,
-            target_dtype=target_dtype,
-            debug=self.debug,
-        )
+        if isinstance(prompt, str):
+            prompt = [prompt]
+        txt = self.t5(prompt)
+        if txt.shape[0] == 1 and bs > 1:
+            txt = repeat(txt, "1 ... -> bs ...", bs=bs)
+        txt_ids = torch.zeros(bs, txt.shape[1], 3, dtype=target_dtype, device=target_device)
+
+        vec = self.clip(prompt)
+        if vec.shape[0] == 1 and bs > 1:
+            vec = repeat(vec, "1 ... -> bs ...", bs=bs)
+
         # offload text encoder to cpu if needed
         if self.offload_text_encoder:
             self.clip.to("cpu")
