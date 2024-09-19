@@ -313,7 +313,6 @@ class Predictor(BasePredictor):
         image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
         seed: Optional[int] = None,
-        profile: bool = None,
     ) -> List[Image]:
         """Run a single prediction on the model"""
         print("running quantized prediction")
@@ -334,7 +333,6 @@ class Predictor(BasePredictor):
             seed=seed,
             init_image=image,
             strength=prompt_strength,
-            profiling=profile,
             num_images=num_outputs
         )
 
@@ -429,15 +427,15 @@ class SchnellPredictor(Predictor):
         go_fast: bool = SHARED_INPUTS.go_fast,
     ) -> List[Path]:
         if go_fast:
-            imgs = self.fp8_predict(
+            imgs, np_imgs = self.fp8_predict(
                 prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed
             )
         else:
-            imgs = self.base_predict(
+            imgs, np_imgs = self.base_predict(
                 prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed
             )
 
-        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality)
+        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, np_images=np_imgs)
 
 
 class DevPredictor(Predictor):
@@ -490,7 +488,7 @@ class DevPredictor(Predictor):
             go_fast = False
 
         if go_fast:
-            imgs = self.fp8_predict(
+            imgs, np_imgs = self.fp8_predict(
                 prompt,
                 aspect_ratio,
                 num_outputs,
@@ -501,7 +499,7 @@ class DevPredictor(Predictor):
                 seed=seed,
             )
         else:
-            imgs = self.base_predict(
+            imgs, np_imgs = self.base_predict(
                 prompt,
                 aspect_ratio,
                 num_outputs,
@@ -512,7 +510,7 @@ class DevPredictor(Predictor):
                 seed=seed,
             )
 
-        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality)
+        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, np_images=np_imgs)
 
 
 class TestPredictor(Predictor):

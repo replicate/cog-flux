@@ -399,7 +399,7 @@ class FluxPipeline:
         pil_images: List[Image] = []
         for i in range(num_images):
             im = (
-                x[i]
+                rearrange(x[i], "c h w -> h w c")
                 .clamp(-1, 1)
                 .add(1.0)
                 .mul(127.5)
@@ -686,7 +686,7 @@ class FluxPipeline:
         guidance_vec = torch.full(
             (img.shape[0],), guidance, device=self.device_flux, dtype=self.dtype
         )
-
+        t_vec = None
         for t_curr, t_prev in tqdm(
             zip(timesteps[:-1], timesteps[1:]), total=len(timesteps) - 1
         ):
