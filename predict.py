@@ -265,7 +265,7 @@ class Predictor(BasePredictor):
         images = [Image.fromarray((127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy()) for i in range(num_outputs)]
         return images
     
-    def postprocess(self, images: List[Image], disable_safety_checker: bool, output_format: str, output_quality: int, profile: bool) -> List[Path]:
+    def postprocess(self, images: List[Image], disable_safety_checker: bool, output_format: str, output_quality: int, profile: bool = False) -> List[Path]:
         has_nsfw_content = [False] * len(images)
         if not disable_safety_checker:
             _, has_nsfw_content = self.run_safety_checker(images) # always on gpu
@@ -357,16 +357,15 @@ class SchnellPredictor(Predictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        profile: bool = Input(description="torch profile", default=False),
         go_fast: bool = SHARED_INPUTS.go_fast
     ) -> List[Path]:
         
         if go_fast:
-            imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed, profile=profile)
+            imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed)
         else:
-            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed, profile=profile)
+            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed)
         
-        return self.postprocess(imgs, output_format, output_quality, disable_safety_checker, profile)
+        return self.postprocess(imgs, output_format, output_quality, disable_safety_checker)
     
 
 class DevPredictor(Predictor):
@@ -404,7 +403,6 @@ class DevPredictor(Predictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        profile: bool = Input(description="torch profile", default=False),
         go_fast: bool = SHARED_INPUTS.go_fast
     ) -> List[Path]:
         
@@ -413,11 +411,11 @@ class DevPredictor(Predictor):
             go_fast = False
             
         if go_fast:
-            imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed, profile=profile)
+            imgs = self.fp8_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed)
         else:
-            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed, profile=profile)
+            imgs = self.base_predict(prompt, aspect_ratio, num_outputs, num_inference_steps, guidance=guidance, image=image, prompt_strength=prompt_strength, seed=seed)
 
-        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, profile)
+        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality)
     
 
 class TestPredictor(Predictor):

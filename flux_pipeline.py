@@ -30,7 +30,7 @@ config.cache_size_limit = 10000000000
 ind_config.shape_padding = True
 import platform
 
-from loguru import logger
+#from loguru import logger
 from torchvision.transforms import functional as TF
 from tqdm import tqdm
 
@@ -136,7 +136,7 @@ class FluxPipeline:
             try:
                 seed = abs(int(seed)) % MAX_RAND
             except Exception as e:
-                logger.warning(
+                print(
                     f"Recieved string representation of seed, but was not able to convert to int: {seed}, using random seed"
                 )
                 seed = abs(self.rng.seed()) % MAX_RAND
@@ -184,7 +184,7 @@ class FluxPipeline:
 
         # Run warmups if the checkpoint is not prequantized
         if not self.config.prequantized_flow:
-            logger.info("Running warmups for compile...")
+            print("Running warmups for compile...")
             warmup_dict = dict(
                 prompt="A beautiful test image used to solidify the fp8 nn.Linear input scales prior to compilation 😉",
                 height=768,
@@ -611,8 +611,7 @@ class FluxPipeline:
 
         generator, seed = self.set_seed(seed)
 
-        if not silent:
-            logger.info(f"Generating with:\nSeed: {seed}\nPrompt: {prompt}")
+        print(f"Using seed: {seed}")
 
         # preprocess the latent
         img, timesteps = self.preprocess_latent(
@@ -703,7 +702,6 @@ class FluxPipeline:
                     )
                 else:
                     t_vec = t_vec.reshape((img.shape[0],)).fill_(t_curr)
-
                 if compiling:
                     torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) 
                     torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
@@ -741,7 +739,7 @@ class FluxPipeline:
                 config.ckpt_path = flow_model_path
             for k, v in kwargs.items():
                 if hasattr(config, k):
-                    logger.info(
+                    print(
                         f"Overriding config {k}:{getattr(config, k)} with value {v}"
                     )
                     setattr(config, k, v)
@@ -755,7 +753,7 @@ class FluxPipeline:
 
         with torch.inference_mode():
             if debug:
-                logger.info(
+                print(
                     f"Loading as prequantized flow transformer? {config.prequantized_flow}"
                 )
 
