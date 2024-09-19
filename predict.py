@@ -302,6 +302,41 @@ class Predictor(BasePredictor):
         np_images = [(127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy() for i in range(num_outputs)]
         images = [Image.fromarray(img) for img in np_images]
         return images, np_images
+    
+    def fp8_predict(
+        self,
+        prompt: str,
+        aspect_ratio: str,
+        num_outputs: int,
+        num_inference_steps: int,
+        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
+        image: Path = None,  # img2img for flux-dev
+        prompt_strength: float = 0.8,
+        seed: Optional[int] = None,
+        profile: bool = None,
+    ) -> List[Image]:
+        """Run a single prediction on the model"""
+        print("running quantized prediction")
+        if seed is None:
+            seed = np.random.randint(1, 100000)
+
+        width, height = self.aspect_ratio_to_width_height(aspect_ratio)
+        if image:
+            image = Image.open(image).convert("RGB")
+        print("generating")
+        
+        return self.fp8_pipe.generate(
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_steps=num_inference_steps,
+            guidance=guidance,
+            seed=seed,
+            init_image=image,
+            strength=prompt_strength,
+            profiling=profile,
+            num_images=num_outputs
+        )
 
     def postprocess(
         self,
@@ -364,41 +399,6 @@ class Predictor(BasePredictor):
             result = self.falcon_model.config.id2label[predicted_label]
 
         return result == "normal"
-
-    def fp8_predict(
-        self,
-        prompt: str,
-        aspect_ratio: str,
-        num_outputs: int,
-        num_inference_steps: int,
-        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
-        image: Path = None,  # img2img for flux-dev
-        prompt_strength: float = 0.8,
-        seed: Optional[int] = None,
-        profile: bool = None,
-    ) -> List[Image]:
-        """Run a single prediction on the model"""
-        print("running quantized prediction")
-        if seed is None:
-            seed = np.random.randint(1, 100000)
-
-        width, height = self.aspect_ratio_to_width_height(aspect_ratio)
-        if image:
-            image = Image.open(image).convert("RGB")
-        print("generating")
-        output_pil_img = self.fp8_pipe.generate(
-            prompt=prompt,
-            width=width,
-            height=height,
-            num_steps=num_inference_steps,
-            guidance=guidance,
-            seed=seed,
-            init_image=image,
-            strength=prompt_strength,
-            profiling=profile,
-        )
-
-        return [output_pil_img]
 
 
 class SchnellPredictor(Predictor):

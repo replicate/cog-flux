@@ -391,13 +391,14 @@ class FluxPipeline:
         return im
     
     @torch.inference_mode()
-    def as_pil(self, x: torch.Tensor) -> io.BytesIO:
+    def as_img_tensor(self, x: torch.Tensor) -> io.BytesIO:
         """Converts the image tensor to bytes."""
         # bring into PIL format and save
         num_images = x.shape[0]
-        images: List[torch.Tensor] = []
+        np_images: List[np.array] = []
+        pil_images: List[Image] = []
         for i in range(num_images):
-            x = (
+            im = (
                 x[i]
                 .clamp(-1, 1)
                 .add(1.0)
@@ -405,16 +406,13 @@ class FluxPipeline:
                 .clamp(0, 255)
                 .contiguous()
                 .type(torch.uint8)
+                .cpu()
+                .numpy()
             )
-            images.append(x)
-        if len(images) == 1:
-            im = images[0]
-        else:
-            im = torch.vstack(images)
+            np_images.append(im)
+            pil_images.append(Image.fromarray(im))
 
-        im = self.img_encoder.encode_pil(im)
-        images.clear()
-        return im
+        return pil_images, np_images
 
     @torch.inference_mode()
     def load_init_image_if_needed(
@@ -557,7 +555,6 @@ class FluxPipeline:
         num_images: int = 1,
         jpeg_quality: int = 99,
         compiling: bool = False,
-        profiling: bool = False,
     ) -> io.BytesIO:
         """
         Generate images based on the given prompt and parameters.
@@ -635,89 +632,29 @@ class FluxPipeline:
             ),
         )
 
-        # this is ignored for schnell
-        guidance_vec = torch.full(
-            (img.shape[0],), guidance, device=self.device_flux, dtype=self.dtype
-        )
-        t_vec = None
         # dispatch to gpu if offloaded
         if self.offload_flow:
             self.model.to(self.device_flux)
 
         # perform the denoising loop
-        if profiling: 
-            if os.path.exists("/src/traces/"):
-                shutil.rmtree("/src/traces/")
-            os.makedirs("/src/traces/")
-            def trace_handler(prof):
-                prof.export_chrome_trace("/src/traces/trace_num_" + str(prof.step_num)+ ".json")
+        batch_size = img.shape[0]
+        output_imgs = []
 
-            with torch.profiler.profile(
-                activities = [
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA
-                ],
-                on_trace_ready=trace_handler
-            ) as p:
-                for t_curr, t_prev in tqdm(
-                    zip(timesteps[:-1], timesteps[1:]), total=len(timesteps) - 1, disable=silent
-                ):
-                    if t_vec is None:
-                        t_vec = torch.full(
-                            (img.shape[0],),
-                            t_curr,
-                            dtype=self.dtype,
-                            device=self.device_flux,
-                        )
-                    else:
-                        t_vec = t_vec.reshape((img.shape[0],)).fill_(t_curr)
-
-                    if compiling:
-                        torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) 
-                        torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
-                        self.model = torch.compile(self.model)
-                    
-                    pred = self.model(
-                        img=img,
-                        img_ids=img_ids,
-                        txt=txt,
-                        txt_ids=txt_ids,
-                        y=vec,
-                        timesteps=t_vec,
-                        guidance=guidance_vec,
-                    )
-
-                    img = img + (t_prev - t_curr) * pred
-                    p.step()
-        else:
-            for t_curr, t_prev in tqdm(
-                zip(timesteps[:-1], timesteps[1:]), total=len(timesteps) - 1, disable=silent
-            ):
-                if t_vec is None:
-                    t_vec = torch.full(
-                        (img.shape[0],),
-                        t_curr,
-                        dtype=self.dtype,
-                        device=self.device_flux,
-                    )
-                else:
-                    t_vec = t_vec.reshape((img.shape[0],)).fill_(t_curr)
-                if compiling:
-                    torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) 
-                    torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
-                    self.model = torch.compile(self.model)
-                
-                pred = self.model(
-                    img=img,
-                    img_ids=img_ids,
-                    txt=txt,
-                    txt_ids=txt_ids,
-                    y=vec,
-                    timesteps=t_vec,
-                    guidance=guidance_vec,
-                )
-
-                img = img + (t_prev - t_curr) * pred
+        for i in range(batch_size):
+            denoised_img = self.denoise_single_item(
+                img[i],
+                img_ids[i],
+                txt[i],
+                txt_ids[i],
+                vec[i],
+                timesteps,
+                guidance,
+                compiling
+            )
+            output_imgs.append(denoised_img)
+            compiling = False
+        
+        img = torch.cat(output_imgs)
 
         # offload the model to cpu if needed
         if self.offload_flow:
@@ -727,7 +664,59 @@ class FluxPipeline:
         # decode latents to pixel space
         img = self.vae_decode(img, height, width)
 
-        return self.as_pil(img)
+        return self.as_img_tensor(img)
+    
+    def denoise_single_item(self,
+                            img,
+                            img_ids,
+                            txt,
+                            txt_ids,
+                            vec,
+                            timesteps,
+                            guidance,
+                            compiling
+                            ):
+        
+        img = img.unsqueeze(0)
+        img_ids = img_ids.unsqueeze(0)
+        txt = txt.unsqueeze(0)
+        txt_ids = txt_ids.unsqueeze(0)
+        vec = vec.unsqueeze(0)
+
+        guidance_vec = torch.full(
+            (img.shape[0],), guidance, device=self.device_flux, dtype=self.dtype
+        )
+
+        for t_curr, t_prev in tqdm(
+            zip(timesteps[:-1], timesteps[1:]), total=len(timesteps) - 1
+        ):
+            if t_vec is None:
+                t_vec = torch.full(
+                    (img.shape[0],),
+                    t_curr,
+                    dtype=self.dtype,
+                    device=self.device_flux,
+                )
+            else:
+                t_vec = t_vec.reshape((img.shape[0],)).fill_(t_curr)
+            if compiling:
+                torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) 
+                torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
+                self.model = torch.compile(self.model)
+                compiling = False
+            
+            pred = self.model(
+                img=img,
+                img_ids=img_ids,
+                txt=txt,
+                txt_ids=txt_ids,
+                y=vec,
+                timesteps=t_vec,
+                guidance=guidance_vec,
+            )
+
+            img = img + (t_prev - t_curr) * pred
+        return img
 
     @classmethod
     def load_pipeline_from_config_path(
