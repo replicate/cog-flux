@@ -1,13 +1,21 @@
 import os
-import pickle
 import time
+from typing import Any, Optional
+
+import torch
+
+torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.benchmark_limit = 20
 import logging
-from typing import Optional
 
 from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
+from flux_pipeline import FluxPipeline
+from util import LoadedModels
 
-import torch
 import numpy as np
 from einops import rearrange
 from PIL import Image
@@ -65,28 +73,34 @@ class SharedInputs:
     num_outputs: Input = Input(description="Number of outputs to generate", default=1, le=4, ge=1)
     seed: Input = Input(description="Random seed. Set for reproducible generation", default=None)
     output_format: Input = Input(
-            description="Format of the output images",
-            choices=["webp", "jpg", "png"],
-            default="webp",
-        )
+        description="Format of the output images",
+        choices=["webp", "jpg", "png"],
+        default="webp",
+    )
     output_quality: Input = Input(
-            description="Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs",
-            default=80,
-            ge=0,
-            le=100,
-        )
+        description="Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs",
+        default=80,
+        ge=0,
+        le=100,
+    )
     disable_safety_checker: Input = Input(
-            description="Disable safety checker for generated images.",
-            default=False,
+        description="Disable safety checker for generated images.",
+        default=False,
+    )
+    go_fast: Input = Input(
+        description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
+        default=True,
     )
 
+
 SHARED_INPUTS = SharedInputs()
+
 
 class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name: str, compile: bool) -> None:
+    def base_setup(self, flow_model_name: str) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -124,23 +138,37 @@ class Predictor(BasePredictor):
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
-        if compile:
-            torch._inductor.config.fallback_random = True
-            self.compile_run = True
-            self.predict(
-                prompt="a cool dog",
-                aspect_ratio="1:1",
-                image=None,
-                prompt_strength=1,
-                num_outputs=1,
-                num_inference_steps=self.num_steps,
-                guidance=3.5,
-                output_format='png',
-                output_quality=80,
-                disable_safety_checker=True,
-                seed=123
+
+        shared_models = LoadedModels(flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None)
+
+        self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
+            f"configs/config-1-{flow_model_name}-h100.json", shared_models=shared_models
+        )
+
+        print("compiling")
+        st = time.time()
+        self.fp8_pipe.generate(
+            prompt="a cool dog",
+            width=1344,
+            height=768,
+            num_steps=self.num_steps,
+            guidance=3,
+            seed=123,
+            compiling=compile,
+        )
+
+        for k in ASPECT_RATIOS.keys():
+            print(f"warming kernel for {k}")
+            width, height = self.aspect_ratio_to_width_height(k)
+            self.fp8_pipe.generate(
+                prompt="godzilla!",
+                width=width,
+                height=height,
+                num_steps=4,
+                guidance=3
             )
 
+        print("compiled in ", time.time() - st)
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         return ASPECT_RATIOS.get(aspect_ratio)
@@ -161,19 +189,18 @@ class Predictor(BasePredictor):
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
 
+    @torch.inference_mode()
     def base_predict(
         self,
         prompt: str,
         aspect_ratio: str,
         num_outputs: int,
-        output_format: str,
-        output_quality: int,
-        disable_safety_checker: bool,
         num_inference_steps: int,
-        guidance: float = 3.5, # schnell ignores guidance within the model, fine to have default
-        image: Path = None, # img2img for flux-dev
+        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
+        image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
         seed: Optional[int] = None,
+        profile: bool = None,
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -226,7 +253,7 @@ class Predictor(BasePredictor):
 
         if self.offload:
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
-        inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt]*num_outputs)
+        inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
@@ -237,7 +264,22 @@ class Predictor(BasePredictor):
             print("Compiling")
             st = time.time()
 
-        x, flux = denoise(self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run)
+        if profile:
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as p:
+                x, flux = denoise(
+                    self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run
+                )
+
+            p.export_chrome_trace("trace.json")
+        else:
+            x, flux = denoise(
+                self.flux, **inp, timesteps=timesteps, guidance=guidance, compile_run=self.compile_run
+            )
 
         if self.compile_run:
             print(f"Compiled in {time.time() - st}")
@@ -259,9 +301,57 @@ class Predictor(BasePredictor):
 
         np_images = [(127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy() for i in range(num_outputs)]
         images = [Image.fromarray(img) for img in np_images]
+        return images, np_images
+    
+    def fp8_predict(
+        self,
+        prompt: str,
+        aspect_ratio: str,
+        num_outputs: int,
+        num_inference_steps: int,
+        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
+        image: Path = None,  # img2img for flux-dev
+        prompt_strength: float = 0.8,
+        seed: Optional[int] = None,
+    ) -> List[Image]:
+        """Run a single prediction on the model"""
+        print("running quantized prediction")
+        if seed is None:
+            seed = np.random.randint(1, 100000)
+
+        width, height = self.aspect_ratio_to_width_height(aspect_ratio)
+        if image:
+            image = Image.open(image).convert("RGB")
+        print("generating")
+        
+        return self.fp8_pipe.generate(
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_steps=num_inference_steps,
+            guidance=guidance,
+            seed=seed,
+            init_image=image,
+            strength=prompt_strength,
+            num_images=num_outputs
+        )
+
+    def postprocess(
+        self,
+        images: List[Image],
+        disable_safety_checker: bool,
+        output_format: str,
+        output_quality: int,
+        np_images: Optional[List[Image]] = None,
+        profile: bool = False,
+    ) -> List[Path]:
         has_nsfw_content = [False] * len(images)
+
+        if not np_images:
+            np_images = [np.array(val) for val in images]
+
         if not disable_safety_checker:
-            _, has_nsfw_content = self.run_safety_checker(images, np_images) # always on gpu
+            _, has_nsfw_content = self.run_safety_checker(images, np_images)
 
         output_paths = []
         for i, (img, is_nsfw) in enumerate(zip(images, has_nsfw_content)):
@@ -276,14 +366,18 @@ class Predictor(BasePredictor):
                     continue
 
             output_path = f"out-{i}.{output_format}"
-            save_params = {'quality': output_quality, 'optimize': True} if output_format != 'png' else {}
+            save_params = {"quality": output_quality, "optimize": True} if output_format != "png" else {}
             img.save(output_path, **save_params)
             output_paths.append(Path(output_path))
 
         if not output_paths:
-            raise Exception("All generated images contained NSFW content. Try running it again with a different prompt.")
+            raise Exception(
+                "All generated images contained NSFW content. Try running it again with a different prompt."
+            )
 
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
+        if profile:
+            output_paths.append(Path("trace.json"))
         return output_paths
 
     def run_safety_checker(self, images, np_images):
@@ -293,7 +387,7 @@ class Predictor(BasePredictor):
             clip_input=safety_checker_input.pixel_values.to(torch.float16),
         )
         return image, has_nsfw_concept
-
+    
     def run_falcon_safety_checker(self, image):
         with torch.no_grad():
             inputs = self.falcon_processor(images=image, return_tensors="pt")
@@ -304,11 +398,23 @@ class Predictor(BasePredictor):
 
         return result == "normal"
 
+
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell", compile=False)
+        self.base_setup("flux-schnell")
 
-    @torch.inference_mode()
+        # this is how we compile the bf16 model
+        # self.compile_run = True
+        # self.predict(
+        #     prompt="a cool dog",
+        #     aspect_ratio="1:1",
+        #     num_outputs=1,
+        #     output_format='png',
+        #     output_quality=80,
+        #     disable_safety_checker=True,
+        #     seed=123
+        # )
+
     def predict(
         self,
         prompt: str = SHARED_INPUTS.prompt,
@@ -318,31 +424,98 @@ class SchnellPredictor(Predictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+        go_fast: bool = SHARED_INPUTS.go_fast,
     ) -> List[Path]:
+        if go_fast:
+            imgs, np_imgs = self.fp8_predict(
+                prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed
+            )
+        else:
+            imgs, np_imgs = self.base_predict(
+                prompt, aspect_ratio, num_outputs, num_inference_steps=self.num_steps, seed=seed
+            )
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, num_inference_steps=self.num_steps, seed=seed)
+        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, np_images=np_imgs)
 
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev", compile=True)
+        self.base_setup("flux-dev")
 
-    @torch.inference_mode()
+        # this is how we compile the bf16 model
+        # self.compile_run = True
+        # self.predict(
+        #     prompt="a cool dog",
+        #     aspect_ratio="1:1",
+        #     image=None,
+        #     prompt_strength=1,
+        #     num_outputs=1,
+        #     num_inference_steps=self.num_steps,
+        #     guidance=3.5,
+        #     output_format='png',
+        #     output_quality=80,
+        #     disable_safety_checker=True,
+        #     seed=123
+        # )
+
     def predict(
         self,
         prompt: str = SHARED_INPUTS.prompt,
         aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
-        image: Path = Input(description="Input image for image to image mode. The aspect ratio of your output will match this image", default=None),
-        prompt_strength: float = Input(description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
-            ge=0.0, le=1.0, default=0.80,
+        image: Path = Input(
+            description="Input image for image to image mode. The aspect ratio of your output will match this image",
+            default=None,
+        ),
+        prompt_strength: float = Input(
+            description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            ge=0.0,
+            le=1.0,
+            default=0.80,
         ),
         num_outputs: int = SHARED_INPUTS.num_outputs,
-        num_inference_steps: int = Input(description="Number of denoising steps. Recommended range is 28-50", ge=1, le=50, default=28),
+        num_inference_steps: int = Input(
+            description="Number of denoising steps. Recommended range is 28-50", ge=1, le=50, default=28
+        ),
         guidance: float = Input(description="Guidance for generated image", ge=0, le=10, default=3),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+        go_fast: bool = SHARED_INPUTS.go_fast,
     ) -> List[Path]:
+        if image and go_fast:
+            print("img2img not supported with fp8 quantization; running with bf16")
+            go_fast = False
 
-        return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed)
+        if go_fast:
+            imgs, np_imgs = self.fp8_predict(
+                prompt,
+                aspect_ratio,
+                num_outputs,
+                num_inference_steps,
+                guidance=guidance,
+                image=image,
+                prompt_strength=prompt_strength,
+                seed=seed,
+            )
+        else:
+            imgs, np_imgs = self.base_predict(
+                prompt,
+                aspect_ratio,
+                num_outputs,
+                num_inference_steps,
+                guidance=guidance,
+                image=image,
+                prompt_strength=prompt_strength,
+                seed=seed,
+            )
+
+        return self.postprocess(imgs, disable_safety_checker, output_format, output_quality, np_images=np_imgs)
+
+
+class TestPredictor(Predictor):
+    def setup(self) -> None:
+        self.num = 3
+
+    def predict(self, how_many: int = Input(description="how many", ge=0)) -> Any:
+        return self.num + how_many
