@@ -9,6 +9,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.benchmark_limit = 20
+import logging
 
 from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
@@ -27,22 +28,48 @@ from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_wei
 from diffusers.pipelines.stable_diffusion.safety_checker import (
     StableDiffusionSafetyChecker,
 )
-from transformers import CLIPImageProcessor
+from transformers import (
+    CLIPImageProcessor,
+    AutoModelForImageClassification,
+    ViTImageProcessor,
+)
 
 SAFETY_CACHE = "./safety-cache"
 FEATURE_EXTRACTOR = "/src/feature-extractor"
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
 MAX_IMAGE_SIZE = 1440
 
+FALCON_MODEL_NAME = "Falconsai/nsfw_image_detection"
+FALCON_MODEL_CACHE = "falcon-cache"
+FALCON_MODEL_URL = (
+    "https://weights.replicate.delivery/default/falconai/nsfw-image-detection.tar"
+)
+
+# Suppress diffusers nsfw warnings
+logging.getLogger("diffusers").setLevel(logging.CRITICAL)
+logging.getLogger("transformers").setLevel(logging.CRITICAL)
+
+ASPECT_RATIOS = {
+    "1:1": (1024, 1024),
+    "16:9": (1344, 768),
+    "21:9": (1536, 640),
+    "3:2": (1216, 832),
+    "2:3": (832, 1216),
+    "4:5": (896, 1088),
+    "5:4": (1088, 896),
+    "3:4": (896, 1152),
+    "4:3": (1152, 896),
+    "9:16": (768, 1344),
+    "9:21": (640, 1536),
+}
 
 @dataclass
 class SharedInputs:
     prompt: Input = Input(description="Prompt for generated image")
     aspect_ratio: Input = Input(
-        description="Aspect ratio for the generated image",
-        choices=["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"],
-        default="1:1",
-    )
+            description="Aspect ratio for the generated image",
+            choices=list(ASPECT_RATIOS.keys()),
+            default="1:1")
     num_outputs: Input = Input(description="Number of outputs to generate", default=1, le=4, ge=1)
     seed: Input = Input(description="Random seed. Set for reproducible generation", default=None)
     output_format: Input = Input(
@@ -88,6 +115,15 @@ class Predictor(BasePredictor):
         ).to("cuda")
         self.feature_extractor = CLIPImageProcessor.from_pretrained(FEATURE_EXTRACTOR)
 
+        print("Loading Falcon safety checker...")
+        if not os.path.exists(FALCON_MODEL_CACHE):
+            download_weights(FALCON_MODEL_URL, FALCON_MODEL_CACHE)
+        self.falcon_model = AutoModelForImageClassification.from_pretrained(
+            FALCON_MODEL_NAME,
+            cache_dir=FALCON_MODEL_CACHE,
+        )
+        self.falcon_processor = ViTImageProcessor.from_pretrained(FALCON_MODEL_NAME)
+
         # need > 48 GB of ram to store all models in VRAM
         self.offload = "A40" in gpu_name
 
@@ -123,18 +159,7 @@ class Predictor(BasePredictor):
         print("compiled in ", time.time() - st)
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
-        aspect_ratios = {
-            "1:1": (1024, 1024),
-            "16:9": (1344, 768),
-            "21:9": (1536, 640),
-            "3:2": (1216, 832),
-            "2:3": (832, 1216),
-            "4:5": (896, 1088),
-            "5:4": (1088, 896),
-            "9:16": (768, 1344),
-            "9:21": (640, 1536),
-        }
-        return aspect_ratios.get(aspect_ratio)
+        return ASPECT_RATIOS.get(aspect_ratio)
 
     def get_image(self, image: str):
         if image is None:
@@ -262,13 +287,9 @@ class Predictor(BasePredictor):
             self.ae.decoder.cpu()
             torch.cuda.empty_cache()
 
-        images = [
-            Image.fromarray(
-                (127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy()
-            )
-            for i in range(num_outputs)
-        ]
-        return images
+        np_images = [(127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0)).cpu().byte().numpy() for i in range(num_outputs)]
+        images = [Image.fromarray(img) for img in np_images]
+        return images, np_images
 
     def postprocess(
         self,
@@ -276,17 +297,28 @@ class Predictor(BasePredictor):
         disable_safety_checker: bool,
         output_format: str,
         output_quality: int,
+        np_images: Optional[List[Image]] = None,
         profile: bool = False,
     ) -> List[Path]:
         has_nsfw_content = [False] * len(images)
+
+        if not np_images:
+            np_images = [np.array(val) for val in images]
+
         if not disable_safety_checker:
-            _, has_nsfw_content = self.run_safety_checker(images)  # always on gpu
+            _, has_nsfw_content = self.run_safety_checker(images, np_images)
 
         output_paths = []
         for i, (img, is_nsfw) in enumerate(zip(images, has_nsfw_content)):
             if is_nsfw:
-                print(f"NSFW content detected in image {i+1}. This image will not be returned.")
-                continue
+                try:
+                    falcon_is_safe = self.run_falcon_safety_checker(img)
+                except Exception as e:
+                    print(f"Error running safety checker: {e}")
+                    falcon_is_safe = False
+                if not falcon_is_safe:
+                    print(f"NSFW content detected in image {i}")
+                    continue
 
             output_path = f"out-{i}.{output_format}"
             save_params = {"quality": output_quality, "optimize": True} if output_format != "png" else {}
@@ -303,14 +335,23 @@ class Predictor(BasePredictor):
             output_paths.append(Path("trace.json"))
         return output_paths
 
-    def run_safety_checker(self, images):
+    def run_safety_checker(self, images, np_images):
         safety_checker_input = self.feature_extractor(images, return_tensors="pt").to("cuda")
-        np_images = [np.array(img) for img in images]
         image, has_nsfw_concept = self.safety_checker(
             images=np_images,
             clip_input=safety_checker_input.pixel_values.to(torch.float16),
         )
         return image, has_nsfw_concept
+    
+    def run_falcon_safety_checker(self, image):
+        with torch.no_grad():
+            inputs = self.falcon_processor(images=image, return_tensors="pt")
+            outputs = self.falcon_model(**inputs)
+            logits = outputs.logits
+            predicted_label = logits.argmax(-1).item()
+            result = self.falcon_model.config.id2label[predicted_label]
+
+        return result == "normal"
 
     def fp8_predict(
         self,
