@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install ruff
+      run: |
+        pip install ruff
+
+    - name: Run ruff linter
+      run: |
+        ruff check
+
+    - name: Run ruff formatter
+      run: |
+        ruff format --diff

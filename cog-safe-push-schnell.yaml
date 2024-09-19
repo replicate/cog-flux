@@ -1,0 +1,74 @@
+model: replicate/flux-schnell-internal-model
+test_model: replicate/test-flux-schnell
+predict:
+  compare_outputs: false  # TODO(andreas): why doesn't this work?
+  predict_timeout: 600
+  test_cases:
+
+    # basic
+    - inputs:
+        prompt: A journey to the middle of the earth
+        num_outputs: 1
+        num_inference_steps: 28
+        guidance_scale: 3.5
+        seed: 5259
+        output_format: jpg
+      match_url: https://replicate.delivery/yhqm/66YPxVFyHFoZDhU6AwnsqLe0yPjIpxEfLzbxdDI9x5oDglemA/out-0.jpg
+
+    # 4 outputs
+    - inputs:
+        prompt: A journey to the middle of the earth
+        num_outputs: 4
+        num_inference_steps: 10
+        guidance_scale: 1.0
+        seed: 5259
+        output_format: png
+      match_prompt: Four png images
+
+    # disable safety checker
+    - inputs:
+        prompt: A journey to the middle of the earth
+        num_outputs: 1
+        num_inference_steps: 10
+        guidance_scale: 1.0
+        seed: 5259
+        output_format: png
+        disable_safety_checker: true
+      match_url: https://replicate.delivery/yhqm/kayZMznpdtbPDFyGu280CMJAeXNObkwm12FKK7KunH7LwSvJA/out-0.png
+
+    # aspect ratio
+    - inputs:
+        prompt: A journey to the middle of the earth
+        num_outputs: 1
+        num_inference_steps: 10
+        guidance_scale: 1.0
+        seed: 5259
+        output_format: png
+        aspect_ratio: "3:2"
+      match_url: https://replicate.delivery/yhqm/PAaYAqG2nqr5GxBKwq2UDvpQXbD79RENfNADXVgJUM0MwSvJA/out-0.png
+
+    # go slow
+    - inputs:
+        prompt: A journey to the middle of the earth
+        num_outputs: 1
+        num_inference_steps: 28
+        guidance_scale: 3.5
+        seed: 5259
+        output_format: jpg
+        go_fast: false
+      match_url: https://replicate.delivery/yhqm/1CIJcRQlZqa6HB2ziivmNLGTKMefe1cpVlonDjZ5ECd2AL9mA/out-0.jpg
+
+    # slow 4 outputs
+    - inputs:
+        prompt: A journey to the middle of the earth
+        num_outputs: 4
+        num_inference_steps: 10
+        guidance_scale: 3.5
+        seed: 5259
+        output_format: jpg
+        go_fast: false
+      match_prompt: 4 jpg images
+
+  fuzz:
+    duration: 120
+    iterations: 10
