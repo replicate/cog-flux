@@ -28,7 +28,6 @@ except ImportError:
 
 
 class F8Linear(nn.Module):
-
     def __init__(
         self,
         in_features: int,
@@ -92,11 +91,11 @@ class F8Linear(nn.Module):
         self,
         state_dict,
         prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
+        local_metadata,  # noqa
+        strict,  # noqa
+        missing_keys,  # noqa
+        unexpected_keys,  # noqa
+        error_msgs,  # noqa
     ):
         sd = {k.replace(prefix, ""): v for k, v in state_dict.items()}
         if "weight" in sd:
@@ -162,9 +161,7 @@ class F8Linear(nn.Module):
                         if "input_scale_reciprocal" in sd
                         else None
                     )
-                    self.input_scale_initialized = (
-                        True if "input_scale" in sd else False
-                    )
+                    self.input_scale_initialized = "input_scale" in sd
                     self.trial_index = (
                         self.num_scale_trials if "input_scale" in sd else 0
                     )
@@ -222,8 +219,7 @@ class F8Linear(nn.Module):
             return self.to_fp8_saturated(x, self.input_scale, self.input_max_value).to(
                 self.input_float8_dtype
             )
-        elif self.trial_index < self.num_scale_trials:
-
+        if self.trial_index < self.num_scale_trials:
             amax = torch.max(torch.abs(x)).float()
 
             self.input_amax_trials[self.trial_index] = amax
@@ -235,15 +231,14 @@ class F8Linear(nn.Module):
             return self.to_fp8_saturated(x, self.input_scale, self.input_max_value).to(
                 self.input_float8_dtype
             )
-        else:
-            self.input_scale = self.amax_to_scale(
-                self.input_amax_trials.max(), self.input_max_value
-            )
-            self.input_scale_reciprocal = self.input_scale.reciprocal()
-            self.input_scale_initialized = True
-            return self.to_fp8_saturated(x, self.input_scale, self.input_max_value).to(
-                self.input_float8_dtype
-            )
+        self.input_scale = self.amax_to_scale(
+            self.input_amax_trials.max(), self.input_max_value
+        )
+        self.input_scale_reciprocal = self.input_scale.reciprocal()
+        self.input_scale_initialized = True
+        return self.to_fp8_saturated(x, self.input_scale, self.input_max_value).to(
+            self.input_float8_dtype
+        )
 
     def reset_parameters(self) -> None:
         if self.weight_initialized:
@@ -262,7 +257,7 @@ class F8Linear(nn.Module):
             self.input_amax_trials.zero_()
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)  # noqa
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             init.uniform_(self.bias, -bound, bound)
         self.quantize_weight()
@@ -281,7 +276,7 @@ class F8Linear(nn.Module):
         x = x.view(-1, self.in_features)
 
         # float8 matmul, much faster than float16 matmul w/ float32 accumulate on ADA devices!
-        out = torch._scaled_mm(
+        out = torch._scaled_mm(  # noqa
             x,
             self.float8_data.T,
             scale_a=self.input_scale_reciprocal,
@@ -292,8 +287,7 @@ class F8Linear(nn.Module):
         )
         if IS_TORCH_2_4:
             out = out[0]
-        out = out.view(*prev_dims, self.out_features)
-        return out
+        return out.view(*prev_dims, self.out_features)
 
     @classmethod
     def from_linear(
@@ -348,7 +342,6 @@ def recursive_swap_linears(
         if isinstance(child, nn.Linear) and not isinstance(
             child, (F8Linear, CublasLinear)
         ):
-
             setattr(
                 model,
                 name,

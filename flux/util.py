@@ -183,7 +183,7 @@ def download_ckpt_from_hf(
     return Path(ckpt_path).resolve(), Path(ae_path).resolve() if ae_path else None
 
 
-def download_weights(url: str, dest: str):
+def download_weights(url: str, dest: Path):
     start = time.time()
     print("downloading url: ", url)
     print("downloading to: ", dest)
