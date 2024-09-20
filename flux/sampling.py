@@ -117,7 +117,11 @@ def denoise_single_item(
         torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
         options = {"timing_cache_path": "."}
-        model = torch.compile(model, backend="tensorrt")
+        t_vec = torch.full((1,), timesteps[0], dtype=img.dtype, device=img.device)
+        input = [img, img_ids, txt, txt_ids, vec, t_vec, guidance_vec]
+        # Attempting to broadcast a dimension of length 128 at -1! Mismatching argument at index 1 had torch.Size([1, 128]); but expected shape should be broadcastable to [1, 1, 768]
+        model = torch_tensorrt.compile(model, ir="dynamo", inputs=input)
+        torch_tensorrt.save(model, "flux-trt.ep", inputs=input)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)

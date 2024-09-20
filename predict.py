@@ -132,8 +132,6 @@ class Predictor(BasePredictor):
                 prompt="a cool dog",
                 aspect_ratio="1:1",
                 num_outputs=1,
-                num_inference_steps=self.num_steps,
-                guidance=3.5,
                 output_format="png",
                 output_quality=80,
                 disable_safety_checker=True,
@@ -143,6 +141,8 @@ class Predictor(BasePredictor):
                 args.update(
                     image=None,
                     prompt_strength=1,
+                    num_inference_steps=self.num_steps,
+                    guidance=3.5,
                 )
 
             self.predict(**args)
