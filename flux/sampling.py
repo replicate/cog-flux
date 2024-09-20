@@ -113,19 +113,21 @@ def denoise_single_item(
     vec = vec.unsqueeze(0)
     guidance_vec = torch.full((1,), guidance, device=img.device, dtype=img.dtype)
 
-    if compile_run: 
-        torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
-        torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
-        options = {"timing_cache_path": "."}
-        t_vec = torch.full((1,), timesteps[0], dtype=img.dtype, device=img.device)
-        input = [img, img_ids, txt, txt_ids, vec, t_vec, guidance_vec]
-        # Attempting to broadcast a dimension of length 128 at -1! Mismatching argument at index 1 had torch.Size([1, 128]); but expected shape should be broadcastable to [1, 1, 768]
-        model = torch_tensorrt.compile(model, ir="dynamo", inputs=input)
-        torch_tensorrt.save(model, "flux-trt.ep", inputs=input)
-
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
-        
+
+
+        if compile_run:
+            import torch_tensorrt
+            compile_run = False
+            torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
+            torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
+            options = {"timing_cache_path": "."}
+            input = [img, img_ids, txt, txt_ids, t_vec, vec, guidance_vec]
+            # Attempting to broadcast a dimension of length 128 at -1! Mismatching argument at index 1 had torch.Size([1, 128]); but expected shape should be broadcastable to [1, 1, 768]
+            model = torch_tensorrt.compile(model, ir="dynamo", inputs=input)
+            torch_tensorrt.save(model, "flux-trt.ep", inputs=input)
+
         pred = model(
             img=img,
             img_ids=img_ids,
