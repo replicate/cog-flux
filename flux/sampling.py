@@ -30,7 +30,9 @@ def get_noise(
     )
 
 
-def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[str]) -> dict[str, Tensor]:
+def prepare(
+    t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[str]
+) -> dict[str, Tensor]:
     bs, c, h, w = img.shape
     if bs == 1 and not isinstance(prompt, str):
         bs = len(prompt)
@@ -104,7 +106,7 @@ def denoise_single_item(
     vec: Tensor,
     timesteps: list[float],
     guidance: float = 4.0,
-    compile_run: bool = False
+    compile_run: bool = False,
 ):
     img = img.unsqueeze(0)
     img_ids = img_ids.unsqueeze(0)
@@ -113,20 +115,33 @@ def denoise_single_item(
     vec = vec.unsqueeze(0)
     guidance_vec = torch.full((1,), guidance, device=img.device, dtype=img.dtype)
 
+
+
+    if compile_run:
+        import torch_tensorrt
+        from torch_tensorrt import Input
+        inputs = dict(
+            img=Input(
+                min_shape=(1, 3808, 64), opt_shape=(1, 4096, 64), max_shape=(1, 4096, 64)
+            ),
+            img_ids=Input(
+                min_shape=(1, 3808, 3), opt_shape=(1, 4096, 3), max_shape=(1, 4096, 3)
+            ),
+            txt=Input((1, 512, 4096)),
+            txt_ids=Input((1, 512, 3)),
+            vec=Input((1, 768)),
+        )
+
+        compile_run = False
+        # torch._dynamo.mark_dynamic(img, 1, min=256, max=8100)  # needs at least torch 2.4
+        # torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
+        # options = {"timing_cache_path": "."}
+        # input = [img, img_ids, txt, txt_ids, t_vec, vec, guidance_vec]
+        model = torch_tensorrt.compile(model, ir="dynamo", inputs=input, debug=True)
+        torch_tensorrt.save(model, "flux-trt.ep", inputs=input)
+
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
-
-
-        if compile_run:
-            import torch_tensorrt
-            compile_run = False
-            torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
-            torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
-            options = {"timing_cache_path": "."}
-            input = [img, img_ids, txt, txt_ids, t_vec, vec, guidance_vec]
-            # Attempting to broadcast a dimension of length 128 at -1! Mismatching argument at index 1 had torch.Size([1, 128]); but expected shape should be broadcastable to [1, 1, 768]
-            model = torch_tensorrt.compile(model, ir="dynamo", inputs=input, debug=True)
-            torch_tensorrt.save(model, "flux-trt.ep", inputs=input)
 
         pred = model(
             img=img,
@@ -142,6 +157,7 @@ def denoise_single_item(
 
     return img, model
 
+
 def denoise(
     model: Flux,
     # model input
@@ -153,7 +169,7 @@ def denoise(
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
-    compile_run: bool = False
+    compile_run: bool = False,
 ):
     batch_size = img.shape[0]
     output_imgs = []
@@ -168,12 +184,13 @@ def denoise(
             vec[i],
             timesteps,
             guidance,
-            compile_run
+            compile_run,
         )
         compile_run = False
         output_imgs.append(denoised_img)
-    
+
     return torch.cat(output_imgs), model
+
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
     return rearrange(
