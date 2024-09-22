@@ -125,7 +125,7 @@ def denoise_single_item(
             options = {"timing_cache_path": "."}
             input = [img, img_ids, txt, txt_ids, t_vec, vec, guidance_vec]
             # Attempting to broadcast a dimension of length 128 at -1! Mismatching argument at index 1 had torch.Size([1, 128]); but expected shape should be broadcastable to [1, 1, 768]
-            model = torch_tensorrt.compile(model, ir="dynamo", inputs=input)
+            model = torch_tensorrt.compile(model, ir="dynamo", inputs=input, debug=True)
             torch_tensorrt.save(model, "flux-trt.ep", inputs=input)
 
         pred = model(

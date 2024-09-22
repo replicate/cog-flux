@@ -1,4 +1,6 @@
 import os
+os.environ["TORCH_LOGS"] = "+dynamic"
+
 import pickle
 import time
 import logging
