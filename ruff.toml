@@ -31,8 +31,6 @@ exclude = [
     "util.py",
     "lora_loading.py",
     "flux_pipeline.py",
-    "flux_emphasis.py",
-    "demo_st.py",
 ]
 
 # Same as Black.
