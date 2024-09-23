@@ -24,9 +24,8 @@ class EmbedND(nn.Module):
 
         return emb.unsqueeze(1)
 
-default_time_factor = torch.tensor(1000.0)
 
-def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: Tensor = default_time_factor):
+def timestep_embedding(t: Tensor, dim, max_period=10000):
     """
     Create sinusoidal timestep embeddings.
     :param t: a 1-D Tensor of N indices, one per batch element.
@@ -35,6 +34,7 @@ def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: Tensor = d
     :param max_period: controls the minimum frequency of the embeddings.
     :return: an (N, D) Tensor of positional embeddings.
     """
+    time_factor = torch.tensor(1000.0)
     t = time_factor * t
     half = dim // 2
     freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(

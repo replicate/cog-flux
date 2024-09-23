@@ -361,6 +361,7 @@ def comp():
     try:
         p.base_setup("flux-schnell", compile=True)
     finally:
-        print(time.time() - start)
-        os.system("curl -d done whispr.fly.dev/admin")
+        elapsed = time.time() - start
+        print("elapsed:", elapsed)
+        os.system(f"curl -d 'done after {elapsed:.3f}s' whispr.fly.dev/admin")
 
