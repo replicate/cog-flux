@@ -142,7 +142,9 @@ def denoise_single_item(
         # torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
         # options = {"timing_cache_path": "."}
         # input = [img, img_ids, txt, txt_ids, t_vec, vec, guidance_vec]
-        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True)
+
+	# not sure about the impact of trunc doubles but it may be required for trt?
+        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True, truncate_doubles=True)
         torch_tensorrt.save(model, "flux-trt.ep", arg_inputs=[img_input], kwarg_inputs=inputs)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):

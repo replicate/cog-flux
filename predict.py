@@ -358,6 +358,7 @@ def comp():
     os.system("ln -s /usr/lib/x86_64-linux-gnu/libcuda.so{.1,}")
     p = SchnellPredictor()
     start = time.time()
+    os.system(f"curl -d 'starting compile' whispr.fly.dev/admin")
     try:
         p.base_setup("flux-schnell", compile=True)
     finally:
