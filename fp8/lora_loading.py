@@ -7,8 +7,8 @@ try:
     from cublas_ops import CublasLinear
 except Exception as e:
     CublasLinear = type(None)
-from float8_quantize import F8Linear
-from modules.flux_model import Flux
+from fp8.float8_quantize import F8Linear
+from fp8.modules.flux_model import Flux
 
 
 def swap_scale_shift(weight):

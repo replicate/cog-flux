@@ -13,8 +13,8 @@ import logging
 
 from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
-from flux_pipeline import FluxPipeline
-from util import LoadedModels
+from fp8.flux_pipeline import FluxPipeline
+from fp8.util import LoadedModels
 
 import numpy as np
 from einops import rearrange
@@ -105,7 +105,12 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name: str) -> None:
+    def base_setup(
+        self,
+        flow_model_name: str,
+        compile_fp8: bool = False,
+        compile_bf16: bool = False,
+    ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -157,10 +162,18 @@ class Predictor(BasePredictor):
         )
 
         self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
-            f"configs/config-1-{flow_model_name}-h100.json", shared_models=shared_models
+            f"fp8/configs/config-1-{flow_model_name}-h100.json",
+            shared_models=shared_models,
         )
 
-        print("compiling")
+        if compile_fp8:
+            self.compile_fp8()
+
+        if compile_bf16:
+            self.compile_bf16()
+
+    def compile_fp8(self):
+        print("compiling fp8 model")
         st = time.time()
         self.fp8_pipe.generate(
             prompt="a cool dog",
@@ -179,6 +192,21 @@ class Predictor(BasePredictor):
                 prompt="godzilla!", width=width, height=height, num_steps=4, guidance=3
             )
 
+        print("compiled in ", time.time() - st)
+
+    def compile_bf16(self):
+        print("compiling bf16 model")
+        st = time.time()
+
+        self.compile_run = True
+        self.base_predict(
+            prompt="a cool dog",
+            aspect_ratio="1:1",
+            num_outputs=1,
+            num_inference_steps=self.num_steps,
+            guidance=3.5,
+            seed=123,
+        )
         print("compiled in ", time.time() - st)
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
@@ -211,7 +239,6 @@ class Predictor(BasePredictor):
         image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
         seed: Optional[int] = None,
-        profile: bool = None,
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -280,37 +307,15 @@ class Predictor(BasePredictor):
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
 
-        if self.compile_run:
-            print("Compiling")
-            st = time.time()
-
-        if profile:
-            with torch.profiler.profile(
-                activities=[
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ]
-            ) as p:
-                x, flux = denoise(
-                    self.flux,
-                    **inp,
-                    timesteps=timesteps,
-                    guidance=guidance,
-                    compile_run=self.compile_run,
-                )
-
-            p.export_chrome_trace("trace.json")
-        else:
-            x, flux = denoise(
-                self.flux,
-                **inp,
-                timesteps=timesteps,
-                guidance=guidance,
-                compile_run=self.compile_run,
-            )
+        x, flux = denoise(
+            self.flux,
+            **inp,
+            timesteps=timesteps,
+            guidance=guidance,
+            compile_run=self.compile_run,
+        )
 
         if self.compile_run:
-            print(f"Compiled in {time.time() - st}")
             self.compile_run = False
             self.flux = flux
 
@@ -377,7 +382,6 @@ class Predictor(BasePredictor):
         output_format: str,
         output_quality: int,
         np_images: Optional[List[Image]] = None,
-        profile: bool = False,
     ) -> List[Path]:
         has_nsfw_content = [False] * len(images)
 
@@ -414,8 +418,6 @@ class Predictor(BasePredictor):
             )
 
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
-        if profile:
-            output_paths.append(Path("trace.json"))
         return output_paths
 
     def run_safety_checker(self, images, np_images):
@@ -441,19 +443,7 @@ class Predictor(BasePredictor):
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell")
-
-        # this is how we compile the bf16 model
-        # self.compile_run = True
-        # self.predict(
-        #     prompt="a cool dog",
-        #     aspect_ratio="1:1",
-        #     num_outputs=1,
-        #     output_format='png',
-        #     output_quality=80,
-        #     disable_safety_checker=True,
-        #     seed=123
-        # )
+        self.base_setup("flux-schnell", compile_fp8=True)
 
     def predict(
         self,
@@ -494,23 +484,7 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev")
-
-        # this is how we compile the bf16 model
-        # self.compile_run = True
-        # self.predict(
-        #     prompt="a cool dog",
-        #     aspect_ratio="1:1",
-        #     image=None,
-        #     prompt_strength=1,
-        #     num_outputs=1,
-        #     num_inference_steps=self.num_steps,
-        #     guidance=3.5,
-        #     output_format='png',
-        #     output_quality=80,
-        #     disable_safety_checker=True,
-        #     seed=123
-        # )
+        self.base_setup("flux-dev", compile_fp8=True)
 
     def predict(
         self,
