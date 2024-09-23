@@ -24,8 +24,9 @@ class EmbedND(nn.Module):
 
         return emb.unsqueeze(1)
 
+default_time_factor = torch.tensor(1000.0)
 
-def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: float = 1000.0):
+def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: Tensor = default_time_factor):
     """
     Create sinusoidal timestep embeddings.
     :param t: a 1-D Tensor of N indices, one per batch element.
