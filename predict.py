@@ -232,8 +232,7 @@ class Predictor(BasePredictor):
         guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
         image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
-        seed: Optional[int] = None,
-        profile: bool = None,
+        seed: Optional[int] = None
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -302,30 +301,13 @@ class Predictor(BasePredictor):
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
 
-        if profile:
-            with torch.profiler.profile(
-                activities=[
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ]
-            ) as p:
-                x, flux = denoise(
-                    self.flux,
-                    **inp,
-                    timesteps=timesteps,
-                    guidance=guidance,
-                    compile_run=self.compile_run,
-                )
-
-            p.export_chrome_trace("trace.json")
-        else:
-            x, flux = denoise(
-                self.flux,
-                **inp,
-                timesteps=timesteps,
-                guidance=guidance,
-                compile_run=self.compile_run,
-            )
+        x, flux = denoise(
+            self.flux,
+            **inp,
+            timesteps=timesteps,
+            guidance=guidance,
+            compile_run=self.compile_run,
+        )
 
         if self.compile_run:
             self.compile_run = False
@@ -393,8 +375,7 @@ class Predictor(BasePredictor):
         disable_safety_checker: bool,
         output_format: str,
         output_quality: int,
-        np_images: Optional[List[Image]] = None,
-        profile: bool = False,
+        np_images: Optional[List[Image]] = None
     ) -> List[Path]:
         has_nsfw_content = [False] * len(images)
 
@@ -431,8 +412,6 @@ class Predictor(BasePredictor):
             )
 
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
-        if profile:
-            output_paths.append(Path("trace.json"))
         return output_paths
 
     def run_safety_checker(self, images, np_images):
