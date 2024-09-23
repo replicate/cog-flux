@@ -3,7 +3,6 @@ import time
 from typing import Any, Optional
 
 import torch
-
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -105,7 +104,7 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name: str) -> None:
+    def base_setup(self, flow_model_name: str, compile_fp8: bool = False, compile_bf16: bool = False) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -160,7 +159,14 @@ class Predictor(BasePredictor):
             f"configs/config-1-{flow_model_name}-h100.json", shared_models=shared_models
         )
 
-        print("compiling")
+        if compile_fp8:
+            self.compile_fp8()
+
+        if compile_bf16:
+            self.compile_bf16()
+
+    def compile_fp8(self):
+        print("compiling fp8 model")
         st = time.time()
         self.fp8_pipe.generate(
             prompt="a cool dog",
@@ -180,6 +186,22 @@ class Predictor(BasePredictor):
             )
 
         print("compiled in ", time.time() - st)
+
+    def compile_bf16(self):
+        print("compiling bf16 model")
+        st = time.time()
+
+        self.compile_run = True
+        self.base_predict(
+            prompt="a cool dog",
+            aspect_ratio="1:1",
+            num_outputs=1,
+            num_inference_steps=self.num_steps,
+            guidance=3.5,
+            seed=123
+        )
+        print("compiled in ", time.time() - st)
+
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         return ASPECT_RATIOS.get(aspect_ratio)
@@ -280,10 +302,6 @@ class Predictor(BasePredictor):
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
 
-        if self.compile_run:
-            print("Compiling")
-            st = time.time()
-
         if profile:
             with torch.profiler.profile(
                 activities=[
@@ -310,7 +328,6 @@ class Predictor(BasePredictor):
             )
 
         if self.compile_run:
-            print(f"Compiled in {time.time() - st}")
             self.compile_run = False
             self.flux = flux
 
@@ -441,19 +458,7 @@ class Predictor(BasePredictor):
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell")
-
-        # this is how we compile the bf16 model
-        # self.compile_run = True
-        # self.predict(
-        #     prompt="a cool dog",
-        #     aspect_ratio="1:1",
-        #     num_outputs=1,
-        #     output_format='png',
-        #     output_quality=80,
-        #     disable_safety_checker=True,
-        #     seed=123
-        # )
+        self.base_setup("flux-schnell", compile_fp8=True)
 
     def predict(
         self,
@@ -494,23 +499,7 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev")
-
-        # this is how we compile the bf16 model
-        # self.compile_run = True
-        # self.predict(
-        #     prompt="a cool dog",
-        #     aspect_ratio="1:1",
-        #     image=None,
-        #     prompt_strength=1,
-        #     num_outputs=1,
-        #     num_inference_steps=self.num_steps,
-        #     guidance=3.5,
-        #     output_format='png',
-        #     output_quality=80,
-        #     disable_safety_checker=True,
-        #     seed=123
-        # )
+        self.base_setup("flux-dev", compile_fp8=True)
 
     def predict(
         self,

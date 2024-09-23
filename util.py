@@ -34,55 +34,10 @@ class QuantizationDtype(StrEnum):
     qint8 = "qint8"
 
 
-# @dataclass
-# class ModelSpec:
-#     version: ModelVersion
-#     params: FluxParams
-#     ae_params: AutoEncoderParams
-#     ckpt_path: str | None
-#     ae_path: str | None
-#     repo_id: str | None
-#     repo_flow: str | None
-#     repo_ae: str | None
-#     text_enc_max_length: int = 512
-#     text_enc_path: str | None = None
-#     text_enc_device: str | torch.device | None = "cuda:0"
-#     ae_device: str | torch.device | None = "cuda:0"
-#     flux_device: str | torch.device | None = "cuda:0"
-#     flow_dtype: str = "float16"
-#     ae_dtype: str = "bfloat16"
-#     text_enc_dtype: str = "bfloat16"
-#     num_to_quant: Optional[int] = 20
-#     quantize_extras: bool = False
-#     compile_extras: bool = False
-#     compile_blocks: bool = False
-#     flow_quantization_dtype: Optional[QuantizationDtype] = QuantizationDtype.qfloat8
-#     text_enc_quantization_dtype: Optional[QuantizationDtype] = QuantizationDtype.qfloat8
-#     ae_quantization_dtype: Optional[QuantizationDtype] = None
-#     clip_quantization_dtype: Optional[QuantizationDtype] = None
-#     offload_text_encoder: bool = False
-#     offload_vae: bool = False
-#     offload_flow: bool = False
-#     prequantized_flow: bool = False
-#     quantize_modulation: bool = True
-#     quantize_flow_embedder_layers: bool = False
-
-# @dataclass
-# class LoadedModels:
-#     flow: Flux
-#     ae: AutoEncoder
-#     clip: HFEmbedder
-#     t5: HFEmbedder
-#     config: ModelSpec
-
 class ModelSpec(BaseModel):
     class Config:
         arbitrary_types_allowed = True
         use_enum_values = True
-    # model_config: ConfigDict = {
-    #     "arbitrary_types_allowed": True,
-    #     "use_enum_values": True,
-    # }
     version: ModelVersion
     params: FluxParams
     ae_params: AutoEncoderParams
