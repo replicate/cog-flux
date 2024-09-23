@@ -120,25 +120,30 @@ def denoise_single_item(
     if compile_run:
         import torch_tensorrt
         from torch_tensorrt import Input
+        bf16 = torch.bfloat16
+        f32 = torch.float32
         inputs = dict(
             img=Input(
-                min_shape=(1, 3808, 64), opt_shape=(1, 4096, 64), max_shape=(1, 4096, 64)
+                min_shape=(1, 3808, 64), opt_shape=(1, 4096, 64), max_shape=(1, 4096, 64), dtype=bf16
             ),
             img_ids=Input(
-                min_shape=(1, 3808, 3), opt_shape=(1, 4096, 3), max_shape=(1, 4096, 3)
+                min_shape=(1, 3808, 3), opt_shape=(1, 4096, 3), max_shape=(1, 4096, 3), dtype=f32
             ),
-            txt=Input((1, 512, 4096)),
-            txt_ids=Input((1, 512, 3)),
-            vec=Input((1, 768)),
+            txt=Input((1, 512, 4096), dtype=bf16),
+            txt_ids=Input((1, 512, 3), dtype=f32),
+            timesteps=Input((1,), dtype=bf16),
+            y=Input((1, 768), dtype=bf16),
         )
+        # compile checks for (arg_inputs or inputs) and doesn't allow passing all inputs via kw_inputs
+        img_input = inputs.pop("img")
 
         compile_run = False
         # torch._dynamo.mark_dynamic(img, 1, min=256, max=8100)  # needs at least torch 2.4
         # torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
         # options = {"timing_cache_path": "."}
         # input = [img, img_ids, txt, txt_ids, t_vec, vec, guidance_vec]
-        model = torch_tensorrt.compile(model, ir="dynamo", inputs=input, debug=True)
-        torch_tensorrt.save(model, "flux-trt.ep", inputs=input)
+        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True)
+        torch_tensorrt.save(model, "flux-trt.ep", arg_inputs=[img_input], kwarg_inputs=inputs)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
@@ -148,8 +153,8 @@ def denoise_single_item(
             img_ids=img_ids,
             txt=txt,
             txt_ids=txt_ids,
-            y=vec,
             timesteps=t_vec,
+            y=vec,
             guidance=guidance_vec,
         )
 
