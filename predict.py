@@ -3,6 +3,7 @@ import time
 from typing import Any, Optional
 
 import torch
+
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -104,7 +105,12 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
-    def base_setup(self, flow_model_name: str, compile_fp8: bool = False, compile_bf16: bool = False) -> None:
+    def base_setup(
+        self,
+        flow_model_name: str,
+        compile_fp8: bool = False,
+        compile_bf16: bool = False,
+    ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -156,7 +162,8 @@ class Predictor(BasePredictor):
         )
 
         self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
-            f"fp8/configs/config-1-{flow_model_name}-h100.json", shared_models=shared_models
+            f"fp8/configs/config-1-{flow_model_name}-h100.json",
+            shared_models=shared_models,
         )
 
         if compile_fp8:
@@ -198,10 +205,9 @@ class Predictor(BasePredictor):
             num_outputs=1,
             num_inference_steps=self.num_steps,
             guidance=3.5,
-            seed=123
+            seed=123,
         )
         print("compiled in ", time.time() - st)
-
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         return ASPECT_RATIOS.get(aspect_ratio)
@@ -232,7 +238,7 @@ class Predictor(BasePredictor):
         guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
         image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -375,7 +381,7 @@ class Predictor(BasePredictor):
         disable_safety_checker: bool,
         output_format: str,
         output_quality: int,
-        np_images: Optional[List[Image]] = None
+        np_images: Optional[List[Image]] = None,
     ) -> List[Path]:
         has_nsfw_content = [False] * len(images)
 
