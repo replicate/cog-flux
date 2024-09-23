@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 import torch
-from modules.autoencoder import AutoEncoder, AutoEncoderParams
-from modules.conditioner import HFEmbedder
-from modules.flux_model import Flux, FluxParams
+from fp8.modules.autoencoder import AutoEncoder, AutoEncoderParams
+from fp8.modules.conditioner import HFEmbedder
+from fp8.modules.flux_model import Flux, FluxParams
 from safetensors.torch import load_file as load_sft
 
 try:
@@ -280,7 +280,7 @@ def load_autoencoder(config: ModelSpec) -> AutoEncoder:
         print_load_warning(missing, unexpected)
     ae.to(device=into_device(config.ae_device), dtype=into_dtype(config.ae_dtype))
     if config.ae_quantization_dtype is not None:
-        from float8_quantize import recursive_swap_linears
+        from fp8.float8_quantize import recursive_swap_linears
 
         recursive_swap_linears(ae)
     if config.offload_vae:

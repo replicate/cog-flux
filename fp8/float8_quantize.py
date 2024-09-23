@@ -7,7 +7,7 @@ from torch.compiler import is_compiling
 from torch import __version__
 from torch.version import cuda
 
-from modules.flux_model import Modulation
+from fp8.modules.flux_model import Modulation
 
 IS_TORCH_2_4 = __version__ < (2, 4, 9)
 LT_TORCH_2_4 = __version__ < (2, 4)

@@ -46,9 +46,9 @@ else:
 
 
 if TYPE_CHECKING:
-    from modules.autoencoder import AutoEncoder
-    from modules.conditioner import HFEmbedder
-    from modules.flux_model import Flux
+    from fp8.modules.autoencoder import AutoEncoder
+    from fp8.modules.conditioner import HFEmbedder
+    from fp8.modules.flux_model import Flux
 
 
 class FluxPipeline:
@@ -733,7 +733,7 @@ class FluxPipeline:
     def load_pipeline_from_config(
         cls, config: ModelSpec, debug: bool = False, shared_models: LoadedModels = None
     ) -> "FluxPipeline":
-        from float8_quantize import quantize_flow_transformer_and_dispatch_float8
+        from fp8.float8_quantize import quantize_flow_transformer_and_dispatch_float8
 
         with torch.inference_mode():
             if debug:

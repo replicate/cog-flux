@@ -118,7 +118,7 @@ class MLPEmbedder(nn.Module):
     def __init__(
         self, in_dim: int, hidden_dim: int, prequantized: bool = False, quantized=False
     ):
-        from float8_quantize import F8Linear
+        from fp8.float8_quantize import F8Linear
 
         super().__init__()
         self.in_layer = (
@@ -188,7 +188,7 @@ class SelfAttention(nn.Module):
         prequantized: bool = False,
     ):
         super().__init__()
-        from float8_quantize import F8Linear
+        from fp8.float8_quantize import F8Linear
 
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -236,7 +236,7 @@ ModulationOut = namedtuple("ModulationOut", ["shift", "scale", "gate"])
 class Modulation(nn.Module):
     def __init__(self, dim: int, double: bool, quantized_modulation: bool = False):
         super().__init__()
-        from float8_quantize import F8Linear
+        from fp8.float8_quantize import F8Linear
 
         self.is_double = double
         self.multiplier = 6 if double else 3
@@ -272,7 +272,7 @@ class DoubleStreamBlock(nn.Module):
         prequantized: bool = False,
     ):
         super().__init__()
-        from float8_quantize import F8Linear
+        from fp8.float8_quantize import F8Linear
 
         self.dtype = dtype
 
@@ -417,7 +417,7 @@ class SingleStreamBlock(nn.Module):
         prequantized: bool = False,
     ):
         super().__init__()
-        from float8_quantize import F8Linear
+        from fp8.float8_quantize import F8Linear
 
         self.dtype = dtype
         self.hidden_dim = hidden_size
@@ -515,7 +515,7 @@ class Flux(nn.Module):
         prequantized_flow = config.prequantized_flow
         quantized_embedders = config.quantize_flow_embedder_layers and prequantized_flow
         quantized_modulation = config.quantize_modulation and prequantized_flow
-        from float8_quantize import F8Linear
+        from fp8.float8_quantize import F8Linear
 
         if config.params.hidden_size % config.params.num_heads != 0:
             raise ValueError(
