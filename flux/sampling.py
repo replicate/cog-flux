@@ -143,7 +143,11 @@ def denoise_single_item(
         # options = {"timing_cache_path": "."}
         # input = [img, img_ids, txt, txt_ids, t_vec, vec, guidance_vec]
 
-	# not sure about the impact of trunc doubles but it may be required for trt?
+        # torch-trt doesn't support _scaled_dot_product_cudnn_attention
+        # use flash-attn instead for now
+        # a trt sdpa kernel may exist
+        torch.backends.cuda.enable_flash_sdp()
+        # not sure about the impact of trunc doubles but it may be required for trt?
         model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True, truncate_doubles=True)
         torch_tensorrt.save(model, "flux-trt.ep", arg_inputs=[img_input], kwarg_inputs=inputs)
 
