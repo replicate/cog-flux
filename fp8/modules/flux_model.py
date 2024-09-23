@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
-    from util import ModelSpec
+    from fp8.util import ModelSpec
 
 DISABLE_COMPILE = os.getenv("DISABLE_COMPILE", "0") == "1"
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -671,7 +671,7 @@ class Flux(nn.Module):
     def from_pretrained(
         cls: "Flux", path: str, dtype: torch.dtype = torch.float16
     ) -> "Flux":
-        from util import load_config_from_path
+        from fp8.util import load_config_from_path
         from safetensors.torch import load_file
 
         config = load_config_from_path(path)

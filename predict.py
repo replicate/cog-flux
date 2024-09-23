@@ -12,8 +12,8 @@ import logging
 
 from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
-from flux_pipeline import FluxPipeline
-from util import LoadedModels
+from fp8.flux_pipeline import FluxPipeline
+from fp8.util import LoadedModels
 
 import numpy as np
 from einops import rearrange
@@ -156,7 +156,7 @@ class Predictor(BasePredictor):
         )
 
         self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
-            f"configs/config-1-{flow_model_name}-h100.json", shared_models=shared_models
+            f"fp8/configs/config-1-{flow_model_name}-h100.json", shared_models=shared_models
         )
 
         if compile_fp8:

@@ -15,11 +15,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 import torch
 from einops import rearrange, repeat
 
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.backends.cudnn.benchmark = True
-torch.backends.cudnn.benchmark_limit = 20
-torch.set_float32_matmul_precision("high")
 from pybase64 import standard_b64decode
 from torch._dynamo import config
 from torch._inductor import config as ind_config
@@ -32,9 +27,9 @@ import platform
 from torchvision.transforms import functional as TF
 from tqdm import tqdm
 
-import lora_loading
-from image_encoder import ImageEncoder
-from util import (
+import fp8.lora_loading as lora_loading
+from fp8.image_encoder import ImageEncoder
+from fp8.util import (
     LoadedModels,
     ModelSpec,
     ModelVersion,
