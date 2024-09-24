@@ -123,6 +123,7 @@ def denoise_single_item(
         bf16 = torch.bfloat16
         f32 = torch.float32
         # min_d, opt_d, max_d = 3808, 4096, 8100
+        # min_d, opt_d, max_d = 4032, 4096, 4096
         min_d, opt_d, max_d = 4096, 4096, 4096
         inputs = dict(
             img=Input(

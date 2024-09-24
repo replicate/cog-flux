@@ -183,6 +183,10 @@ class DoubleStreamBlock(nn.Module):
         txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1] :]
 
         # calculate the img bloks
+        # pretty sure it's this add
+        # RuntimeError: The size of tensor a (2) must match the size of tensor b (3072) at non-singleton dimension 4
+        # a = [1, 4608, 28, 2, 2], f32
+        # b = [1, 4096, 3072], bf16
         img = img + img_mod1.gate * self.img_attn.proj(img_attn)
         img = img + img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
 
