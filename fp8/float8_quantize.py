@@ -83,10 +83,9 @@ class F8Linear(nn.Module):
             None,
         )
         self.scale_reciprocal = self.register_buffer("scale_reciprocal", None)
-        self.input_scale_reciprocal = self.register_buffer(
+        self.input_reciprocal_scales = self.register_buffer(
             "input_scale_reciprocal", None
         )
-        self.row_scales = self.register_buffer("row_scales", None)
 
     def _load_from_state_dict(
         self,
@@ -148,7 +147,7 @@ class F8Linear(nn.Module):
                     self.scale = sd["scale"].float()
                     self.input_scale = sd["input_scale"].float()
                     self.scale_reciprocal = sd["scale_reciprocal"].float()
-                    self.input_scale_reciprocal = sd["input_scale_reciprocal"].float()
+                    self.input_reciprocal_scales = sd["input_scale_reciprocal"].float()
                     self.input_scale_initialized = True
                     self.trial_index = self.num_scale_trials
                 elif "scale" in sd and "scale_reciprocal" in sd:
@@ -157,7 +156,7 @@ class F8Linear(nn.Module):
                         sd["input_scale"].float() if "input_scale" in sd else None
                     )
                     self.scale_reciprocal = sd["scale_reciprocal"].float()
-                    self.input_scale_reciprocal = (
+                    self.input_reciprocal_scales = (
                         sd["input_scale_reciprocal"].float()
                         if "input_scale_reciprocal" in sd
                         else None
@@ -194,12 +193,13 @@ class F8Linear(nn.Module):
         if self.weight_initialized:
             return
         amax = torch.max(torch.abs(self.weight.data), dim=1).values.float()
-        self.scale = self.amax_to_scale(amax, self.max_value)
+        self.row_scales = self.amax_to_scale(amax, self.max_value)
+        # Quantize each row
         self.float8_data = torch.stack([
             self.to_fp8_saturated(row, scale, self.max_value)
             for row, scale in zip(self.weight.data, self.row_scales)
         ]).to(self.float8_dtype)
-        self.scale_reciprocal = self.scale.reciprocal()
+        self.row_reciprocal_scales = self.row_scales.reciprocal().unsqueeze(1)
         self.weight.data = torch.zeros(
             1, dtype=self.weight.dtype, device=self.weight.device, requires_grad=False
         )
@@ -222,21 +222,25 @@ class F8Linear(nn.Module):
                 self.input_float8_dtype
             )
         if self.trial_index < self.num_scale_trials:
-            amax = torch.max(torch.abs(x)).float()
+            amax = torch.max(torch.abs(x), dim=1).values.float()
+            self.input_amax_trials[self.trial_index] = amax
 
             self.input_amax_trials[self.trial_index] = amax
             self.trial_index += 1
+            cur_max_scales = self.input_amax_trials[0] if self.trial_index == 1 else torch.max(torch.vstack(self.input_amax_trials[: self.trial_index]), dim=0).values.float()
             self.input_scale = self.amax_to_scale(
-                self.input_amax_trials[: self.trial_index].max(), self.input_max_value
+                cur_max_scales, self.input_max_value
             )
-            self.input_scale_reciprocal = self.input_scale.reciprocal()
+            # import pdb
+            # pdb.set_trace()
+            self.input_reciprocal_scales = self.input_scale.reciprocal().unsqueeze(-1)
             return self.to_fp8_saturated(x, self.input_scale, self.input_max_value).to(
                 self.input_float8_dtype
             )
         self.input_scale = self.amax_to_scale(
-            self.input_amax_trials.max(), self.input_max_value
+            torch.max(torch.vstack(self.input_amax_trials[: self.trial_index]), dim=0).values.float(), self.input_max_value
         )
-        self.input_scale_reciprocal = self.input_scale.reciprocal()
+        self.input_reciprocal_scales = self.input_scale.reciprocal().unsqueeze(-1)
         self.input_scale_initialized = True
         return self.to_fp8_saturated(x, self.input_scale, self.input_max_value).to(
             self.input_float8_dtype
@@ -281,8 +285,8 @@ class F8Linear(nn.Module):
         out = torch._scaled_mm(  # noqa
             x,
             self.float8_data.T,
-            scale_a=self.input_scale_reciprocal,
-            scale_b=self.row_scales.reciprocal().unsqueeze(1),
+            scale_a=self.input_reciprocal_scales,
+            scale_b=self.row_reciprocal_scales,
             bias=self.bias,
             out_dtype=self.weight.dtype,
             use_fast_accum=True,
