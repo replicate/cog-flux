@@ -86,6 +86,7 @@ class F8Linear(nn.Module):
         self.input_scale_reciprocal = self.register_buffer(
             "input_scale_reciprocal", None
         )
+        self.row_scales = self.register_buffer("row_scales", None)
 
     def _load_from_state_dict(
         self,
@@ -192,11 +193,12 @@ class F8Linear(nn.Module):
     def quantize_weight(self):
         if self.weight_initialized:
             return
-        amax = torch.max(torch.abs(self.weight.data)).float()
+        amax = torch.max(torch.abs(self.weight.data), dim=1).values.float()
         self.scale = self.amax_to_scale(amax, self.max_value)
-        self.float8_data = self.to_fp8_saturated(
-            self.weight.data, self.scale, self.max_value
-        ).to(self.float8_dtype)
+        self.float8_data = torch.stack([
+            self.to_fp8_saturated(row, scale, self.max_value)
+            for row, scale in zip(self.weight.data, self.row_scales)
+        ]).to(self.float8_dtype)
         self.scale_reciprocal = self.scale.reciprocal()
         self.weight.data = torch.zeros(
             1, dtype=self.weight.dtype, device=self.weight.device, requires_grad=False
@@ -280,7 +282,7 @@ class F8Linear(nn.Module):
             x,
             self.float8_data.T,
             scale_a=self.input_scale_reciprocal,
-            scale_b=self.scale_reciprocal,
+            scale_b=self.row_scales.reciprocal().unsqueeze(1),
             bias=self.bias,
             out_dtype=self.weight.dtype,
             use_fast_accum=True,
