@@ -122,12 +122,14 @@ def denoise_single_item(
         from torch_tensorrt import Input
         bf16 = torch.bfloat16
         f32 = torch.float32
+        # min_d, opt_d, max_d = 3808, 4096, 8100
+        min_d, opt_d, max_d = 4096, 4096, 4096
         inputs = dict(
             img=Input(
-                min_shape=(1, 3808, 64), opt_shape=(1, 4096, 64), max_shape=(1, 4096, 64), dtype=bf16
+                min_shape=(1, min_d, 64), opt_shape=(1, opt_d, 64), max_shape=(1, max_d, 64), dtype=bf16
             ),
             img_ids=Input(
-                min_shape=(1, 3808, 3), opt_shape=(1, 4096, 3), max_shape=(1, 4096, 3), dtype=f32
+                min_shape=(1, min_d, 3), opt_shape=(1, opt_d, 3), max_shape=(1, max_d, 3), dtype=f32
             ),
             txt=Input((1, 512, 4096), dtype=bf16),
             txt_ids=Input((1, 512, 3), dtype=f32),
@@ -146,9 +148,10 @@ def denoise_single_item(
         # torch-trt doesn't support _scaled_dot_product_cudnn_attention
         # use flash-attn instead for now
         # a trt sdpa kernel may exist
-        torch.backends.cuda.enable_flash_sdp()
+        # disable to compile faster
+        # torch.backends.cuda.enable_flash_sdp(True)
         # not sure about the impact of trunc doubles but it may be required for trt?
-        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True, truncate_doubles=True)
+        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True, truncate_double=True, enabled_precision={bf16, f32}, optimization_level=1)
         torch_tensorrt.save(model, "flux-trt.ep", arg_inputs=[img_input], kwarg_inputs=inputs)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):

@@ -355,7 +355,7 @@ class DevPredictor(Predictor):
         return self.base_predict(prompt, aspect_ratio, num_outputs, output_format, output_quality, disable_safety_checker, guidance=guidance, image=image, prompt_strength=prompt_strength, num_inference_steps=num_inference_steps, seed=seed)
 
 def comp():
-    os.system("ln -s /usr/lib/x86_64-linux-gnu/libcuda.so{.1,}")
+    os.system("bash -c 'ln -s /usr/lib/x86_64-linux-gnu/libcuda.so{.1,}'")
     p = SchnellPredictor()
     start = time.time()
     os.system(f"curl -d 'starting compile' whispr.fly.dev/admin")
