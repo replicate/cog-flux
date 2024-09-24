@@ -150,8 +150,7 @@ def denoise_single_item(
         # a trt sdpa kernel may exist
         # disable to compile faster
         # torch.backends.cuda.enable_flash_sdp(True)
-        # not sure about the impact of trunc doubles but it may be required for trt?
-        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True, truncate_double=True, enabled_precision={bf16, f32}, optimization_level=1)
+        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True, enabled_precision={bf16, f32}, optimization_level=1)
         torch_tensorrt.save(model, "flux-trt.ep", arg_inputs=[img_input], kwarg_inputs=inputs)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):

@@ -16,7 +16,8 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     assert dim % 2 == 0
     # f64 is problematic
     # https://github.com/pytorch/TensorRT/blob/v2.4.0/py/torch_tensorrt/dynamo/conversion/converter_utils.py#L380
-    scale = torch.arange(0, dim, 2, dtype=torch.float64, device=pos.device) / dim
+    scale = torch.arange(0, dim, 2, dtype=torch.float32, device=pos.device) / dim
+    # scale = torch.arange(0, dim, 2, dtype=torch.float64, device=pos.device) / dim
     omega = 1.0 / (theta**scale)
     # out = torch.einsum("...n,d->...nd", pos, omega)
     out = pos.unsqueeze(-1) * omega
@@ -27,7 +28,7 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     # out = rearrange(out, "b n d (i j) -> b n d i j", i=2, j=2)
     # Reshaping the tensor to (..., n, d, 2, 2)
     out = out.view(*out.shape[:-1], 2, 2)
-    return out.float()
+    return out # .float()
 
 
 def apply_rope(xq: Tensor, xk: Tensor, freqs_cis: Tensor) -> tuple[Tensor, Tensor]:
