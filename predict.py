@@ -366,3 +366,12 @@ def comp():
         print("elapsed:", elapsed)
         os.system(f"curl -d 'done after {elapsed:.3f}s' whispr.fly.dev/admin")
 
+p_args = dict(
+                prompt="a cool dog",
+                aspect_ratio="1:1",
+                num_outputs=1,
+                output_format="png",
+                output_quality=80,
+                disable_safety_checker=True,
+                seed=123,
+            )

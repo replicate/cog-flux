@@ -7,6 +7,7 @@ from torch import Tensor, nn
 
 from flux.math import attention, rope
 
+from torch._dynamo.comptime import comptime
 
 class EmbedND(nn.Module):
     def __init__(self, dim: int, theta: int, axes_dim: list[int]):
@@ -157,6 +158,7 @@ class DoubleStreamBlock(nn.Module):
         )
 
     def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor) -> tuple[Tensor, Tensor]:
+        # img: (bs, dynamic, hidden_size)
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
@@ -187,7 +189,34 @@ class DoubleStreamBlock(nn.Module):
         # RuntimeError: The size of tensor a (2) must match the size of tensor b (3072) at non-singleton dimension 4
         # a = [1, 4608, 28, 2, 2], f32
         # b = [1, 4096, 3072], bf16
-        img = img + img_mod1.gate * self.img_attn.proj(img_attn)
+        # img_attn is (hidden_size -> hidden_size)
+        # # normal: [1, 1, 3072]
+        comptime.print("====")
+        comptime.print(f"img input {img.shape}")
+        comptime.print(f"img_mod1.gate.shape {img_mod1.gate.shape}")
+        # normal: SelfAttention
+        #comptime.print(f"self.img_attn {self.img_attn}")
+        # normal: ([1, 4096, 3072])
+        # 
+        comptime.print(f"img_attn.shape {img_attn.shape}")
+        proj_out = self.img_attn.proj(img_attn)
+        comptime.print(f"proj_out {proj_out.shape}")
+        out2 = img_mod1.gate * proj_out
+        comptime.print(f"out2 {out2.shape}")
+        img = img + out2
+        comptime.print(f"img result {img.shape}")
+        # 'img input torch.Size([1, 4096, 3072])'
+        # 'img_mod1.gate.shape torch.Size([1, 1, 3072])'
+        # 'img_attn.shape torch.Size([1, 4096, 3072])'
+        # 'proj_out torch.Size([1, 4096, 3072])'
+        # 'out2 torch.Size([1, 4096, 3072])'
+        # 'img result torch.Size([1, 4096, 3072])'
+
+
+
+
+        # pos embed [1, 4096, 2, 2]
+        # img = img + img_mod1.gate * self.img_attn.proj(img_attn)
         img = img + img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
 
         # calculate the txt bloks
