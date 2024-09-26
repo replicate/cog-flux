@@ -150,8 +150,8 @@ def denoise_single_item(
         # use flash-attn instead for now
         # a trt sdpa kernel may exist
         # disable to compile faster
-        # torch.backends.cuda.enable_flash_sdp(True)
-        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True, enabled_precision={bf16, f32}, optimization_level=1)
+        torch.backends.cuda.enable_flash_sdp(True)
+        model = torch_tensorrt.compile(model, ir="dynamo", arg_inputs=[img_input], kwarg_inputs=inputs, debug=True, enabled_precision={bf16, f32}, optimization_level=1, require_full_compilation=True)
         torch_tensorrt.save(model, "flux-trt.ep", arg_inputs=[img_input], kwarg_inputs=inputs)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
