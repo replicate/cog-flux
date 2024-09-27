@@ -3,6 +3,7 @@ import time
 from typing import Any, Dict, Optional
 
 import torch
+import torch._dynamo as dynamo
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -193,7 +194,7 @@ class Predictor(BasePredictor):
         # torch.compile has to recompile if it makes invalid assumptions
         # about the input sizes. Having higher input sizes first makes
         # for fewer recompiles.
-        VAE_SIZES = [
+        vae_sizes = [
             [1, 16, 192, 168],
             [1, 16, 96, 96],
             [1, 16, 96, 168],
@@ -212,21 +213,21 @@ class Predictor(BasePredictor):
         ]
         print("compiling AE")
         st = time.time()
-        device = torch.device('cuda')
+        device = torch.device("cuda")
         if self.offload:
             self.ae.decoder.to(device)
 
         self.ae.decoder = torch.compile(self.ae.decoder)
 
         # actual compilation happens when you give it inputs
-        for f in VAE_SIZES:
+        for f in vae_sizes:
             print("Compiling AE for size", f)
             x = torch.rand(f, device=device)
-            torch._dynamo.mark_dynamic(x, 0, min=1, max=4)
-            torch._dynamo.mark_dynamic(x, 2, min=80)
-            torch._dynamo.mark_dynamic(x, 3, min=80)
+            dynamo.mark_dynamic(x, 0, min=1, max=4)
+            dynamo.mark_dynamic(x, 2, min=80)
+            dynamo.mark_dynamic(x, 3, min=80)
             with torch.autocast(
-                    device_type=device.type, dtype=torch.bfloat16, cache_enabled=False
+                device_type=device.type, dtype=torch.bfloat16, cache_enabled=False
             ):
                 self.ae.decode(x)
 
@@ -234,7 +235,6 @@ class Predictor(BasePredictor):
             self.ae.decoder.cpu()
             torch.cuda.empty_cache()
         print("compiled AE in ", time.time() - st)
-
 
     def compile_fp8(self):
         print("compiling fp8 model")
