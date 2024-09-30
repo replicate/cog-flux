@@ -96,7 +96,11 @@ class SharedInputs:
         description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
         default=True,
     )
-    megapixels: Input = Input(description="Approximate number of megapixels for generated image", choices=["1", "0.25"], default="1")
+    megapixels: Input = Input(
+        description="Approximate number of megapixels for generated image",
+        choices=["1", "0.25"],
+        default="1",
+    )
 
 
 SHARED_INPUTS = SharedInputs()
@@ -193,7 +197,11 @@ class Predictor(BasePredictor):
                 prompt="godzilla!", width=width, height=height, num_steps=4, guidance=3
             )
             self.fp8_pipe.generate(
-                prompt="godzilla!", width=width // 2, height=height // 2, num_steps=4, guidance=3
+                prompt="godzilla!",
+                width=width // 2,
+                height=height // 2,
+                num_steps=4,
+                guidance=3,
             )
 
         print("compiled in ", time.time() - st)
@@ -231,12 +239,14 @@ class Predictor(BasePredictor):
 
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
-    
-    def preprocess(self, aspect_ratio: str, seed: Optional[int], megapixels: str) -> Dict:
+
+    def preprocess(
+        self, aspect_ratio: str, seed: Optional[int], megapixels: str
+    ) -> Dict:
         width, height = ASPECT_RATIOS.get(aspect_ratio)
         if megapixels == "0.25":
             width, height = width // 2, height // 2
-        
+
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
@@ -459,23 +469,17 @@ class SchnellPredictor(Predictor):
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
         go_fast: bool = SHARED_INPUTS.go_fast,
-        megapixels: str = SHARED_INPUTS.megapixels
+        megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
         hws_kwargs = self.preprocess(aspect_ratio, seed, megapixels)
 
         if go_fast:
             imgs, np_imgs = self.fp8_predict(
-                prompt,
-                num_outputs,
-                num_inference_steps=self.num_steps,
-                **hws_kwargs
+                prompt, num_outputs, num_inference_steps=self.num_steps, **hws_kwargs
             )
         else:
             imgs, np_imgs = self.base_predict(
-                prompt,
-                num_outputs,
-                num_inference_steps=self.num_steps,
-                **hws_kwargs
+                prompt, num_outputs, num_inference_steps=self.num_steps, **hws_kwargs
             )
 
         return self.postprocess(
@@ -520,7 +524,7 @@ class DevPredictor(Predictor):
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
         go_fast: bool = SHARED_INPUTS.go_fast,
-        megapixels: str = SHARED_INPUTS.megapixels
+        megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
@@ -535,7 +539,7 @@ class DevPredictor(Predictor):
                 guidance=guidance,
                 image=image,
                 prompt_strength=prompt_strength,
-                **hws_kwargs
+                **hws_kwargs,
             )
         else:
             imgs, np_imgs = self.base_predict(
@@ -545,7 +549,7 @@ class DevPredictor(Predictor):
                 guidance=guidance,
                 image=image,
                 prompt_strength=prompt_strength,
-                **hws_kwargs
+                **hws_kwargs,
             )
 
         return self.postprocess(
