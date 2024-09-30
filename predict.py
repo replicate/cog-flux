@@ -96,7 +96,7 @@ class SharedInputs:
         description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
         default=True,
     )
-    megapixels: Input = Input(description="Approximate number of megapixels for generated image", choices=["1", "0.25"])
+    megapixels: Input = Input(description="Approximate number of megapixels for generated image", choices=["1", "0.25"], default="1")
 
 
 SHARED_INPUTS = SharedInputs()
