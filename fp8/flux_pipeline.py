@@ -203,7 +203,7 @@ class FluxPipeline:
             "final_layer",
             "pe_embedder",
         ]
-        
+
         if self.config.compile_whole_model:
             # we're not doing the compilation here in this case
             return
@@ -384,7 +384,7 @@ class FluxPipeline:
         im = self.img_encoder.encode_torch(im, quality=jpeg_quality)
         images.clear()
         return im
-    
+
     @torch.inference_mode()
     def as_img_tensor(self, x: torch.Tensor) -> io.BytesIO:
         """Converts the image tensor to bytes."""
@@ -593,8 +593,6 @@ class FluxPipeline:
             io.BytesIO: Generated image(s) in bytes format.
             int: Seed used for generation (only if return_seed is True).
         """
-        num_steps = 4 if self.name == "flux-schnell" else num_steps
-
         init_image = self.load_init_image_if_needed(init_image)
 
         # allow for packing and conversion to latent space
@@ -648,7 +646,7 @@ class FluxPipeline:
             )
             output_imgs.append(denoised_img)
             compiling = False
-        
+
         img = torch.cat(output_imgs)
 
         # offload the model to cpu if needed
@@ -660,7 +658,7 @@ class FluxPipeline:
         img = self.vae_decode(img, height, width)
 
         return self.as_img_tensor(img)
-    
+
     def denoise_single_item(self,
                             img,
                             img_ids,
@@ -671,7 +669,7 @@ class FluxPipeline:
                             guidance,
                             compiling
                             ):
-        
+
         img = img.unsqueeze(0)
         img_ids = img_ids.unsqueeze(0)
         txt = txt.unsqueeze(0)
@@ -682,6 +680,7 @@ class FluxPipeline:
             (img.shape[0],), guidance, device=self.device_flux, dtype=self.dtype
         )
         t_vec = None
+
         for t_curr, t_prev in tqdm(
             zip(timesteps[:-1], timesteps[1:]), total=len(timesteps) - 1
         ):
@@ -695,11 +694,11 @@ class FluxPipeline:
             else:
                 t_vec = t_vec.reshape((img.shape[0],)).fill_(t_curr)
             if compiling:
-                torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) 
+                torch._dynamo.mark_dynamic(img, 1, min=256, max=8100)
                 torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
                 self.model = torch.compile(self.model)
                 compiling = False
-            
+
             pred = self.model(
                 img=img,
                 img_ids=img_ids,
