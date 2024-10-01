@@ -147,9 +147,6 @@ class Predictor(BasePredictor):
         # need > 48 GB of ram to store all models in VRAM
         self.offload = "A40" in gpu_name
 
-        # fp8 only works on H100 and l40s atm. 
-        self.disable_fp8 = disable_fp8 or ("H100" not in gpu_name and "L40S" not in gpu_name)
-
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
         self.t5 = load_t5(device, max_length=max_length)
@@ -169,6 +166,10 @@ class Predictor(BasePredictor):
         shared_models = LoadedModels(
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
         )
+
+        # fp8 only works w/compute capability >= 8.9
+        self.disable_fp8 = disable_fp8 or torch.cuda.get_device_capability() < (8, 9)
+        
         if not self.disable_fp8:
             self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
                 f"fp8/configs/config-1-{flow_model_name}-h100.json",
