@@ -115,6 +115,7 @@ class Predictor(BasePredictor):
         flow_model_name: str,
         compile_fp8: bool = False,
         compile_bf16: bool = False,
+        disable_fp8: bool = False,
     ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
@@ -166,13 +167,17 @@ class Predictor(BasePredictor):
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
         )
 
-        self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
-            f"fp8/configs/config-1-{flow_model_name}-h100.json",
-            shared_models=shared_models,
-        )
+        # fp8 only works w/compute capability >= 8.9
+        self.disable_fp8 = disable_fp8 or torch.cuda.get_device_capability() < (8, 9)
 
-        if compile_fp8:
-            self.compile_fp8()
+        if not self.disable_fp8:
+            self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
+                f"fp8/configs/config-1-{flow_model_name}-h100.json",
+                shared_models=shared_models,
+            )
+
+            if compile_fp8:
+                self.compile_fp8()
 
         if compile_bf16:
             self.compile_bf16()
@@ -480,7 +485,7 @@ class SchnellPredictor(Predictor):
     ) -> List[Path]:
         hws_kwargs = self.preprocess(aspect_ratio, seed, megapixels)
 
-        if go_fast:
+        if go_fast and not self.disable_fp8:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
                 num_outputs,
@@ -488,6 +493,8 @@ class SchnellPredictor(Predictor):
                 **hws_kwargs,
             )
         else:
+            if self.disable_fp8:
+                print("running bf16 model, fp8 disabled")
             imgs, np_imgs = self.base_predict(
                 prompt,
                 num_outputs,
@@ -544,7 +551,7 @@ class DevPredictor(Predictor):
             go_fast = False
         hws_kwargs = self.preprocess(aspect_ratio, seed, megapixels)
 
-        if go_fast:
+        if go_fast and not self.disable_fp8:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
                 num_outputs,
@@ -555,6 +562,8 @@ class DevPredictor(Predictor):
                 **hws_kwargs,
             )
         else:
+            if self.disable_fp8:
+                print("running bf16 model, fp8 disabled")
             imgs, np_imgs = self.base_predict(
                 prompt,
                 num_outputs,
