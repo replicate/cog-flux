@@ -1,13 +1,14 @@
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Tuple
 
 import torch
+from safetensors.torch import load_file as load_sft
+
 from fp8.modules.autoencoder import AutoEncoder, AutoEncoderParams
 from fp8.modules.conditioner import HFEmbedder
 from fp8.modules.flux_model import Flux, FluxParams
-from safetensors.torch import load_file as load_sft
 
 try:
     from enum import StrEnum
@@ -18,8 +19,13 @@ except:
         pass
 
 
-from pydantic import BaseModel, Field, validator
 from loguru import logger
+from pydantic import BaseModel, Field, validator
+
+
+def get_compute_capability(device: str | torch.device | None = None) -> Tuple[int, int]:
+    device = torch.device(device)
+    return torch.cuda.get_device_capabilitiy(device)
 
 
 class ModelVersion(StrEnum):
@@ -38,6 +44,7 @@ class ModelSpec(BaseModel):
     class Config:
         arbitrary_types_allowed = True
         use_enum_values = True
+
     version: ModelVersion
     params: FluxParams
     ae_params: AutoEncoderParams
@@ -73,6 +80,7 @@ class ModelSpec(BaseModel):
     quantize_modulation: bool = True
     # Improved precision via not quanitzing the flow embedder layers
     quantize_flow_embedder_layers: bool = False
+
 
 def load_models(config: ModelSpec) -> tuple[Flux, AutoEncoder, HFEmbedder, HFEmbedder]:
     flow = load_flow_model(config)
@@ -288,12 +296,13 @@ def load_autoencoder(config: ModelSpec) -> AutoEncoder:
         torch.cuda.empty_cache()
     return ae
 
+
 @dataclass
-class LoadedModels():
+class LoadedModels:
     flow: Optional[Flux]
     ae: Any
-    clip: Any 
-    t5: Any 
+    clip: Any
+    t5: Any
     config: Optional[ModelSpec]
 
 
@@ -311,7 +320,9 @@ def load_models_from_config_path(
     )
 
 
-def load_models_from_config(config: ModelSpec, shared_models: LoadedModels = None) -> LoadedModels:
+def load_models_from_config(
+    config: ModelSpec, shared_models: LoadedModels = None
+) -> LoadedModels:
     if shared_models:
         clip = shared_models.clip
         t5 = shared_models.t5
@@ -319,7 +330,7 @@ def load_models_from_config(config: ModelSpec, shared_models: LoadedModels = Non
     else:
         clip, t5 = load_text_encoders(config)
         ae = load_autoencoder(config)
-        
+
     flow = load_flow_model(config)
 
     return LoadedModels(

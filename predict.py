@@ -10,28 +10,24 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.benchmark_limit = 20
 import logging
-
-from attr import dataclass
-from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
-from fp8.flux_pipeline import FluxPipeline
-from fp8.util import LoadedModels
+from typing import List
 
 import numpy as np
+from attr import dataclass
+from cog import BasePredictor, Input, Path
+from diffusers.pipelines.stable_diffusion.safety_checker import \
+    StableDiffusionSafetyChecker
 from einops import rearrange
 from PIL import Image
-from typing import List
 from torchvision import transforms
-from cog import BasePredictor, Input, Path
-from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
+from transformers import (AutoModelForImageClassification, CLIPImageProcessor,
+                          ViTImageProcessor)
 
-from diffusers.pipelines.stable_diffusion.safety_checker import (
-    StableDiffusionSafetyChecker,
-)
-from transformers import (
-    CLIPImageProcessor,
-    AutoModelForImageClassification,
-    ViTImageProcessor,
-)
+from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
+from flux.util import (download_weights, load_ae, load_clip, load_flow_model,
+                       load_t5)
+from fp8.flux_pipeline import FluxPipeline
+from fp8.util import LoadedModels, get_compute_capability
 
 SAFETY_CACHE = Path("/src/safety-cache")
 FEATURE_EXTRACTOR = Path("/src/feature-extractor")
@@ -166,10 +162,17 @@ class Predictor(BasePredictor):
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
         )
 
-        self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
-            f"fp8/configs/config-1-{flow_model_name}-h100.json",
-            shared_models=shared_models,
-        )
+        cc_major, cc_minor = get_compute_capability()
+        if cc_major < 8 or (cc_major == 8 and cc_minor < 9):
+            # disable fp8 if GPU is not CC 8.9 or higher
+            print("WARN: Detected GPU with compute capability < 8.9, disabling fp8")
+            compile_fp8 = False
+            self.fp8_pipe = None
+        else:
+            self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
+                f"fp8/configs/config-1-{flow_model_name}-h100.json",
+                shared_models=shared_models,
+            )
 
         if compile_fp8:
             self.compile_fp8()
@@ -377,6 +380,8 @@ class Predictor(BasePredictor):
     ) -> List[Image]:
         """Run a single prediction on the model"""
         print("running quantized prediction")
+        if not self.fp8_pipe:
+            raise Exception("fp8 quantization not enabled")
         return self.fp8_pipe.generate(
             prompt=prompt,
             width=width,
