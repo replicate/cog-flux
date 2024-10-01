@@ -117,6 +117,7 @@ class Predictor(BasePredictor):
         compile_fp8: bool = False,
         compile_bf16: bool = False,
         disable_fp8: bool = False,
+        compile_ae: bool = False,
     ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
@@ -180,7 +181,7 @@ class Predictor(BasePredictor):
             if compile_fp8:
                 self.compile_fp8()
 
-        if (not self.disable_fp8 and compile_fp8) or compile_bf16:
+        if compile_ae:
             self.compile_ae()
 
         if compile_bf16:
@@ -517,7 +518,7 @@ class Predictor(BasePredictor):
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell", compile_fp8=True)
+        self.base_setup("flux-schnell", compile_fp8=True, compile_ae=True)
 
     def predict(
         self,
@@ -567,7 +568,7 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev", compile_fp8=True)
+        self.base_setup("flux-dev", compile_fp8=True, compile_ae=True)
 
     def predict(
         self,
