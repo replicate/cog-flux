@@ -19,7 +19,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 4
-        num_inference_steps: 10
+        num_inference_steps: 20
         guidance: 1.0
         seed: 5259
         output_format: png
@@ -29,7 +29,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 1
-        num_inference_steps: 10
+        num_inference_steps: 20
         guidance: 1.0
         seed: 5259
         output_format: png
@@ -40,7 +40,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 1
-        num_inference_steps: 10
+        num_inference_steps: 20
         guidance: 1.0
         seed: 5259
         output_format: png
@@ -52,7 +52,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 1
-        num_inference_steps: 10
+        num_inference_steps: 20
         guidance: 1.0
         seed: 5259
         output_format: png
@@ -74,7 +74,7 @@ predict:
     - inputs:
         prompt: A journey to the middle of the earth
         num_outputs: 4
-        num_inference_steps: 10
+        num_inference_steps: 20
         guidance: 3.5
         seed: 5259
         output_format: jpg
