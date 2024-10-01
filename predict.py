@@ -147,8 +147,8 @@ class Predictor(BasePredictor):
         # need > 48 GB of ram to store all models in VRAM
         self.offload = "A40" in gpu_name
 
-        # if we're offloading then we're not on an H100; disable fp8. 
-        self.disable_fp8 = disable_fp8 or self.offload
+        # fp8 only works on H100 and l40s atm. 
+        self.disable_fp8 = disable_fp8 or ("H100" not in gpu_name and "L40S" not in gpu_name)
 
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
