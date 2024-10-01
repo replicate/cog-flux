@@ -377,6 +377,7 @@ class Predictor(BasePredictor):
     ) -> List[Image]:
         """Run a single prediction on the model"""
         print("running quantized prediction")
+
         return self.fp8_pipe.generate(
             prompt=prompt,
             width=width,
@@ -464,6 +465,12 @@ class SchnellPredictor(Predictor):
         prompt: str = SHARED_INPUTS.prompt,
         aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
         num_outputs: int = SHARED_INPUTS.num_outputs,
+        num_inference_steps: int = Input(
+            description="Number of denoising steps. Recommended range is 1-4",
+            ge=1,
+            le=4,
+            default=4,
+        ),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
@@ -475,11 +482,17 @@ class SchnellPredictor(Predictor):
 
         if go_fast:
             imgs, np_imgs = self.fp8_predict(
-                prompt, num_outputs, num_inference_steps=self.num_steps, **hws_kwargs
+                prompt,
+                num_outputs,
+                num_inference_steps=num_inference_steps,
+                **hws_kwargs,
             )
         else:
             imgs, np_imgs = self.base_predict(
-                prompt, num_outputs, num_inference_steps=self.num_steps, **hws_kwargs
+                prompt,
+                num_outputs,
+                num_inference_steps=num_inference_steps,
+                **hws_kwargs,
             )
 
         return self.postprocess(
