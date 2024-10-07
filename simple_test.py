@@ -1,11 +1,12 @@
-import torch_tensort
+import accelerate
+import torch_tensorrt
 import torch
 from diffusers import FluxPipeline
 
 
 pipe = FluxPipeline.from_pretrained(
-    "black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16
-)
+    "black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16, device_map="balanced"
+)#.to("cuda")
 inputs = {
     "prompt": "dog",
     # fake, real is 1024x1024
@@ -14,5 +15,5 @@ inputs = {
     "num_inference_steps": 4,
     # "guidance_scale": 3.5,
 }
-mod = torch.compile(pipe, backend="tensorrt", debug=True)
+mod = torch.compile(pipe, backend="tensorrt")
 output = mod(**inputs)
