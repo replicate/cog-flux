@@ -331,8 +331,7 @@ class Predictor(BasePredictor):
 
         if self.offload:
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
-        with nvtx.annotate("prepare"):
-            inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
+        inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
@@ -438,7 +437,8 @@ class Predictor(BasePredictor):
                 if output_format != "png"
                 else {}
             )
-            img.save(output_path, **save_params)
+            with annotate("save"):
+                img.save(output_path, **save_params)
             output_paths.append(Path(output_path))
 
         if not output_paths:
