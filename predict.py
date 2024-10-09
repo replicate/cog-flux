@@ -32,6 +32,8 @@ from transformers import (
     AutoModelForImageClassification,
     ViTImageProcessor,
 )
+import nvtx
+from nvtx import annotate
 
 SAFETY_CACHE = Path("/src/safety-cache")
 FEATURE_EXTRACTOR = Path("/src/feature-extractor")
@@ -110,6 +112,7 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         return
 
+    @annotate("base_setup")
     def base_setup(
         self,
         flow_model_name: str,
@@ -182,6 +185,7 @@ class Predictor(BasePredictor):
         if compile_bf16:
             self.compile_bf16()
 
+    @annotate("compile_fp8")
     def compile_fp8(self):
         print("compiling fp8 model")
         st = time.time()
@@ -259,6 +263,7 @@ class Predictor(BasePredictor):
         return {"width": width, "height": height, "seed": seed}
 
     @torch.inference_mode()
+    @annotate("base_predict")
     def base_predict(
         self,
         prompt: str,
@@ -368,6 +373,7 @@ class Predictor(BasePredictor):
         images = [Image.fromarray(img) for img in np_images]
         return images, np_images
 
+    @annotate("fp8_predict")
     def fp8_predict(
         self,
         prompt: str,
@@ -395,6 +401,7 @@ class Predictor(BasePredictor):
             num_images=num_outputs,
         )
 
+    @annotate("postprocess")
     def postprocess(
         self,
         images: List[Image],
@@ -409,7 +416,8 @@ class Predictor(BasePredictor):
             np_images = [np.array(val) for val in images]
 
         if not disable_safety_checker:
-            _, has_nsfw_content = self.run_safety_checker(images, np_images)
+            with annotate("safety"):
+                _, has_nsfw_content = self.run_safety_checker(images, np_images)
 
         output_paths = []
         for i, (img, is_nsfw) in enumerate(zip(images, has_nsfw_content)):
@@ -429,7 +437,8 @@ class Predictor(BasePredictor):
                 if output_format != "png"
                 else {}
             )
-            img.save(output_path, **save_params)
+            with annotate("save"):
+                img.save(output_path, **save_params)
             output_paths.append(Path(output_path))
 
         if not output_paths:
@@ -465,6 +474,7 @@ class SchnellPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-schnell", compile_fp8=True)
 
+    @annotate("predict")
     def predict(
         self,
         prompt: str = SHARED_INPUTS.prompt,
