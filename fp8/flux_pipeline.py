@@ -12,6 +12,7 @@ from PIL import Image
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+from nvtx import annotate
 import torch
 from einops import rearrange, repeat
 
@@ -217,6 +218,7 @@ class FluxPipeline:
             for extra in to_gpu_extras:
                 getattr(self.model, extra).compile()
 
+    @annotate("prepare")
     @torch.inference_mode()
     def prepare(
         self,
@@ -332,6 +334,7 @@ class FluxPipeline:
 
         return timesteps.tolist()
 
+    @annotate("get_noise")
     @torch.inference_mode()
     def get_noise(
         self,
@@ -432,6 +435,7 @@ class FluxPipeline:
 
         return init_image
 
+    @annotate("vae_decode")
     @torch.inference_mode()
     def vae_decode(self, x: torch.Tensor, height: int, width: int) -> torch.Tensor:
         """Decodes the latent tensor to the pixel space."""
@@ -469,6 +473,7 @@ class FluxPipeline:
         img = TF.center_crop(img, (height, width))
         return img
 
+    @annotate("preproccess")
     @torch.inference_mode()
     def preprocess_latent(
         self,
@@ -659,6 +664,7 @@ class FluxPipeline:
 
         return self.as_img_tensor(img)
 
+    @annotate("denoise")
     def denoise_single_item(self,
                             img,
                             img_ids,
