@@ -4,7 +4,7 @@ from diffusers import FluxPipeline
 
 
 pipe = FluxPipeline.from_pretrained(
-    "black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16
+    "black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16, device_map=None, enable_low_cpu_mem_usage=False
 )
 inputs = {
     "prompt": "dog",
@@ -14,5 +14,7 @@ inputs = {
     "num_inference_steps": 4,
     # "guidance_scale": 3.5,
 }
-mod = torch.compile(pipe, backend="tensorrt", debug=True)
-output = mod(**inputs)
+z = False
+if z:
+    mod = torch.compile(pipe, backend="tensorrt")#, debug=True)
+    output = mod(**inputs)

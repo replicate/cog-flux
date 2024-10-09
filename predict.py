@@ -1,6 +1,6 @@
 import os
 os.environ["TORCH_LOGS"] = "+dynamic"
-
+os.environ["TORCH_COMPILE_DEBUG"] = "1"
 import pickle
 import time
 import logging
