@@ -187,8 +187,7 @@ class Predictor(BasePredictor):
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
         )
 
-        # fp8 only works w/compute capability >= 8.9
-        self.disable_fp8 = disable_fp8 or torch.cuda.get_device_capability() < (8, 9)
+        self.disable_fp8 = disable_fp8
 
         if not self.disable_fp8:
             self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
