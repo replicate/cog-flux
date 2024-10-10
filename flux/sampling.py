@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 
 from .model import Flux
 from .modules.conditioner import HFEmbedder
-
+from nvtx import annotate
 
 def get_noise(
     num_samples: int,

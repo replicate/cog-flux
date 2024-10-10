@@ -19,3 +19,5 @@ __pycache__
 /model-cache
 /safety-cache
 /falcon-cache
+
+*nsys-rep
