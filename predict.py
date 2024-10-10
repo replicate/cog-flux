@@ -190,9 +190,29 @@ class Predictor(BasePredictor):
         self.disable_fp8 = disable_fp8
 
         if not self.disable_fp8:
+            if compile_fp8:
+                extra_args = {
+                    "compile_whole_model": True,
+                    "compile_extras": True,
+                    "compile_blocks": True
+                }
+            else:
+                extra_args = {
+                    "compile_whole_model": False,
+                    "compile_extras": False,
+                    "compile_blocks": False
+                }
+
+            if self.offload:
+                extra_args |= {
+                    "offload_text_encoder": True,
+                    "offload_vae": True,
+                    "offload_flow": True
+                }
             self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
                 f"fp8/configs/config-1-{flow_model_name}-h100.json",
                 shared_models=shared_models,
+                **extra_args
             )
 
             if compile_fp8:
