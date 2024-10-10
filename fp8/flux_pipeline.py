@@ -615,15 +615,16 @@ class FluxPipeline:
         )
 
         # prepare inputs
-        img, img_ids, vec, txt, txt_ids = map(
-            lambda x: x, # x.contiguous(),
-            self.prepare(
-                img=img,
-                prompt=prompt,
-                target_device=self.device_flux,
-                target_dtype=self.dtype,
-            ),
-        )
+        with torch.profiler.record_function("prepare"):
+            img, img_ids, vec, txt, txt_ids = map(
+                lambda x: x, # x.contiguous(),
+                self.prepare(
+                    img=img,
+                    prompt=prompt,
+                    target_device=self.device_flux,
+                    target_dtype=self.dtype,
+                ),
+            )
 
         # dispatch to gpu if offloaded
         if self.offload_flow:
@@ -634,16 +635,17 @@ class FluxPipeline:
         output_imgs = []
 
         for i in range(batch_size):
-            denoised_img = self.denoise_single_item(
-                img[i],
-                img_ids[i],
-                txt[i],
-                txt_ids[i],
-                vec[i],
-                timesteps,
-                guidance,
-                compiling
-            )
+            with torch.profiler.record_function("denoise-single-item"):
+                denoised_img = self.denoise_single_item(
+                    img[i],
+                    img_ids[i],
+                    txt[i],
+                    txt_ids[i],
+                    vec[i],
+                    timesteps,
+                    guidance,
+                    compiling
+                )
             output_imgs.append(denoised_img)
             compiling = False
 
@@ -655,7 +657,8 @@ class FluxPipeline:
             torch.cuda.empty_cache()
 
         # decode latents to pixel space
-        img = self.vae_decode(img, height, width)
+        with torch.profiler.record_function("vae-decode"):
+            img = self.vae_decode(img, height, width)
 
         return self.as_img_tensor(img)
 
