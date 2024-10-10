@@ -127,24 +127,21 @@ class Encoder(nn.Module):
 
         curr_res = resolution
         in_ch_mult = (1,) + tuple(ch_mult)
-        self.in_ch_mult = in_ch_mult
-        self.down = nn.ModuleList()
+        self.in_ch_mult: tuple[int] = in_ch_mult
+        down_layers = []
         block_in = self.ch
         for i_level in range(self.num_resolutions):
-            block = nn.ModuleList()
             attn = nn.ModuleList()
             block_in = ch * in_ch_mult[i_level]
             block_out = ch * ch_mult[i_level]
             for _ in range(self.num_res_blocks):
-                block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
-                block_in = block_out
-            down = nn.Module()
-            down.block = block
-            down.attn = attn
+                down_layers.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
+                block_in = block_out # ?
+            # originally this provided for attn layers, but those are never actually created
             if i_level != self.num_resolutions - 1:
-                down.downsample = Downsample(block_in)
+                down_layers.append(Downsample(block_in))
                 curr_res = curr_res // 2
-            self.down.append(down)
+        self.down = nn.Sequential(*down_layers)
 
         # middle
         self.mid = nn.Module()
@@ -158,18 +155,10 @@ class Encoder(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         # downsampling
-        hs = [self.conv_in(x)]
-        for i_level in range(self.num_resolutions):
-            for i_block in range(self.num_res_blocks):
-                h = self.down[i_level].block[i_block](hs[-1])
-                if len(self.down[i_level].attn) > 0:
-                    h = self.down[i_level].attn[i_block](h)
-                hs.append(h)
-            if i_level != self.num_resolutions - 1:
-                hs.append(self.down[i_level].downsample(hs[-1]))
+        h = self.conv_in(h)
+        h = self.down(h)
 
         # middle
-        h = hs[-1]
         h = self.mid.block_1(h)
         h = self.mid.attn_1(h)
         h = self.mid.block_2(h)
@@ -214,21 +203,19 @@ class Decoder(nn.Module):
         self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
 
         # upsampling
-        self.up = nn.ModuleList()
+        up_layers = []
         for i_level in reversed(range(self.num_resolutions)):
-            block = nn.ModuleList()
-            attn = nn.ModuleList()
+            blocks = []
             block_out = ch * ch_mult[i_level]
             for _ in range(self.num_res_blocks + 1):
-                block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
+                blocks.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
                 block_in = block_out
-            up = nn.Module()
-            up.block = block
-            up.attn = attn
             if i_level != 0:
-                up.upsample = Upsample(block_in)
+                blocks.append(Upsample(block_in))
                 curr_res = curr_res * 2
-            self.up.insert(0, up)  # prepend to get consistent order
+            # ??? gross
+            up_layers = blocks + up_layers  # prepend to get consistent order
+        self.up = nn.Sequential(*up_layers)
 
         # end
         self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
@@ -244,13 +231,7 @@ class Decoder(nn.Module):
         h = self.mid.block_2(h)
 
         # upsampling
-        for i_level in reversed(range(self.num_resolutions)):
-            for i_block in range(self.num_res_blocks + 1):
-                h = self.up[i_level].block[i_block](h)
-                if len(self.up[i_level].attn) > 0:
-                    h = self.up[i_level].attn[i_block](h)
-            if i_level != 0:
-                h = self.up[i_level].upsample(h)
+        h = self.up(h)
 
         # end
         h = self.norm_out(h)
