@@ -19,3 +19,13 @@ __pycache__
 /model-cache
 /safety-cache
 /falcon-cache
+
+*svg
+*png
+*nsys-rep
+*engine
+!decoder.engine
+autocompile*
+db
+something
+torch_compile*

@@ -10,9 +10,8 @@ build:
 
   python_packages:
     - "numpy<2"
-    - "torch==2.4.1"
     - "einops==0.8.0"
-    - "fire==0.6.0"
+    - "fire >= 0.6.0"
     - "huggingface-hub==0.24.3"
     - "safetensors==0.4.3"
     - "sentencepiece==0.2.0"
@@ -23,12 +22,14 @@ build:
     - "loguru==0.7.2"
     - "pybase64==1.4.0"
     - "pydash==8.0.3"
-
+    # pinning to specific nightlies for release
+    - https://download.pytorch.org/whl/nightly/cu124/torch-2.6.0.dev20240918%2Bcu124-cp311-cp311-linux_x86_64.whl
+    - https://download.pytorch.org/whl/nightly/cu124/torchaudio-2.5.0.dev20240918%2Bcu124-cp311-cp311-linux_x86_64.whl
+    - https://download.pytorch.org/whl/nightly/cu124/torchvision-0.20.0.dev20240918%2Bcu124-cp311-cp311-linux_x86_64.whl
+    - https://download.pytorch.org/whl/nightly/pytorch_triton-3.1.0%2B5fe38ffd73-cp311-cp311-linux_x86_64.whl
 
   # commands run after the environment is setup
   run:
     - curl -o /usr/local/bin/pget -L "https://github.com/replicate/pget/releases/download/v0.8.2/pget_linux_x86_64" && chmod +x /usr/local/bin/pget
-    - pip uninstall -y torch torchvision torchaudio
-    # - pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu124
-    # pinning to specific nightlies for release
-    - pip3 install https://download.pytorch.org/whl/nightly/cu124/torch-2.6.0.dev20240918%2Bcu124-cp311-cp311-linux_x86_64.whl https://download.pytorch.org/whl/nightly/cu124/torchaudio-2.5.0.dev20240918%2Bcu124-cp311-cp311-linux_x86_64.whl https://download.pytorch.org/whl/nightly/cu124/torchvision-0.20.0.dev20240918%2Bcu124-cp311-cp311-linux_x86_64.whl https://download.pytorch.org/whl/nightly/pytorch_triton-3.1.0%2B5fe38ffd73-cp311-cp311-linux_x86_64.whl
+    - --mount=type=cache,target=/root/.cache/pip pip install -U --pre torch-tensorrt==2.5.0.dev20240912+cu124 --extra-index-url https://download.pytorch.org/whl/nightly/cu124
+

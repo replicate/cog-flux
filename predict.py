@@ -148,6 +148,8 @@ class Predictor(BasePredictor):
         self.offload = "A40" in gpu_name
 
         device = "cuda"
+        import torch_tensorrt
+
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
         if os.path.exists("decoder.engine"):
             st = time.time()
