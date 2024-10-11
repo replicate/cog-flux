@@ -148,6 +148,20 @@ class Predictor(BasePredictor):
         self.offload = "A40" in gpu_name
 
         device = "cuda"
+        self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
+        if os.path.exists("decoder.engine"):
+            st = time.time()
+            self.ae.decoder = torch.export.load("decoder.engine").module()
+            print(f"loading decoder took {time.time-st:.3f}")
+        else:
+            st = time.time()
+            #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
+            inputs = [torch.randn([1, 16, 128, 128], device="cuda")] # dec
+            dec = torch_tensorrt.compile(self.ae.decoder, inputs=inputs, options={"truncate_long_and_double": True})
+            torch_tensorrt.save(dec, "decoder.engine", inputs=inputs)
+            self.ae.decoder = dec
+            print(f"compiling and saving decoder took {time.time-st:.3f}")
+
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
@@ -155,9 +169,6 @@ class Predictor(BasePredictor):
             self.flow_model_name, device="cpu" if self.offload else device
         )
         self.flux = self.flux.eval()
-        self.ae = load_ae(
-            self.flow_model_name, device="cpu" if self.offload else device
-        )
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
