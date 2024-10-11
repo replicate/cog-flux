@@ -127,6 +127,7 @@ class Modulation(nn.Module):
             ModulationOut(*out[3:]) if self.is_double else None,
         )
 
+comptime.print = lambda *a:None
 
 class DoubleStreamBlock(nn.Module):
     def __init__(self, hidden_size: int, num_heads: int, mlp_ratio: float, qkv_bias: bool = False):

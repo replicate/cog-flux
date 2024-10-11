@@ -125,12 +125,16 @@ class Predictor(BasePredictor):
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
         if os.path.exists("decoder.engine"):
+            t = time.time()
             self.ae.decoder = torch.export.load("decoder.engine").module()
+            print("loading decoder took", time.time()-t)
         else:
             #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
+            t = time.time()
             inputs = [torch.randn([1, 16, 128, 128], device="cuda")] # dec
             dec = torch_tensorrt.compile(self.ae.decoder, inputs=inputs, options={"truncate_long_and_double": True})
             torch_tensorrt.save(dec, "decoder.engine", inputs=inputs)
+            print("compiling and saving decoder took", time.time()-t)
             self.ae.decoder = dec
 
         self.t5 = load_t5(device, max_length=max_length)
