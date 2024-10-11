@@ -1,3 +1,4 @@
+import torch_tensorrt
 import os
 os.environ["TORCH_LOGS"] = "+dynamic"
 os.environ["TORCH_COMPILE_DEBUG"] = "1"
@@ -116,20 +117,30 @@ class Predictor(BasePredictor):
         self.offload = "A40" in gpu_name
 
         device = "cuda"
+        self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
+        inp = [torch.rand([1, 3, 1024, 1024], device="cuda")]
+        opt_ae = torch_tensorrt.compile(self.ae, inputs=inp, options={"truncate_long_and_double": True})
+        torch_tensorrt.save(opt_ae, "autoencoder.engine", inputs=inp)
+        self.ae = opt_ae
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
         self.flux = load_flow_model(self.flow_model_name, device="cpu" if self.offload else device)
         self.flux = self.flux.eval()
-        self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
+
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
         if compile:
-            # self.ae = torch.compile(self.ae)
+            #if os.path.exists
+            #    self.ae = torch.export.load("autoencoder.engine").module()
+            # this is just for decode()
+            # inp = [torch.rand([1, 16, 128, 128])]
+            # this is for forward()
+            #self.ae = torch.compile(self.ae, backend="tensorrt",options={ "truncate_long_and_double": True})
             torch._inductor.config.fallback_random = True
-            self.compile_run = True
+            #self.compile_run = True
             args = dict(
                 prompt="a cool dog",
                 aspect_ratio="1:1",
@@ -232,7 +243,7 @@ class Predictor(BasePredictor):
             x = t * x + (1.0 - t) * init_image.to(x.dtype)
 
         if self.offload:
-            self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
+            self.t5, self.clip =self.t5.to(torch_device), self.clip.to(torch_device)
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt]*num_outputs)
 
         if self.offload:
@@ -365,7 +376,8 @@ def comp():
         elapsed = time.time() - start
         print("elapsed:", elapsed)
         os.system(f"curl -d 'done after {elapsed:.3f}s' whispr.fly.dev/admin")
-
+    return p
+ 
 p_args = dict(
                 prompt="a cool dog",
                 aspect_ratio="1:1",
@@ -374,4 +386,4 @@ p_args = dict(
                 output_quality=80,
                 disable_safety_checker=True,
                 seed=123,
-            )
+             )
