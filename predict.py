@@ -116,6 +116,10 @@ SHARED_INPUTS = SharedInputs()
 class Predictor(BasePredictor):
     def setup(self) -> None:
         return
+    
+    def lora_setup(self):
+        self.bf16_lora = None
+        self.fp8_lora = None
 
     def base_setup(
         self,
@@ -265,10 +269,15 @@ class Predictor(BasePredictor):
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
 
-        unload_loras(self.flux)
         if lora_weights:
-            lora_path = self.weights_cache.ensure(lora_weights)
-            load_lora(self.flux, lora_path, lora_scale)
+            if lora_weights != self.bf16_lora:
+                lora_path = self.weights_cache.ensure(lora_weights)
+                load_lora(self.flux, lora_path, lora_scale)
+            else:
+                print(f"Lora {lora_weights} already loaded")
+        elif self.bf16_lora:
+            unload_loras(self.flux)
+            self.bf16_lora = None
 
         # img2img only works for flux-dev
         if image:
@@ -386,11 +395,15 @@ class Predictor(BasePredictor):
             image = Image.open(image).convert("RGB")
         print("generating")
 
-        unload_loras(self.fp8_pipe.model)
-
         if lora_weights:
-            lora_path = self.weights_cache.ensure(lora_weights)
-            load_lora(self.fp8_pipe.model, lora_path, lora_scale)
+            if lora_weights != self.bf16_lora:
+                lora_path = self.weights_cache.ensure(lora_weights)
+                load_lora(self.fp8_pipe.model, lora_path, lora_scale)
+            else:
+                print(f"Lora {lora_weights} already loaded")
+        elif self.fp8_lora:
+            unload_loras(self.fp8_pipe.model)
+            self.fp8_lora = None
 
         return self.fp8_pipe.generate(
             prompt=prompt,
@@ -584,6 +597,7 @@ class DevPredictor(Predictor):
 class SchnellLoraPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-schnell", compile_fp8=True)
+        self.lora_setup()
 
     def predict(
         self,
