@@ -116,6 +116,11 @@ SHARED_INPUTS = SharedInputs()
 class Predictor(BasePredictor):
     def setup(self) -> None:
         return
+    
+    def lora_setup(self):
+        self.weights_cache = WeightsDownloadCache()
+        self.bf16_lora = None
+        self.fp8_lora = None
 
     def base_setup(
         self,
@@ -123,10 +128,6 @@ class Predictor(BasePredictor):
         compile_fp8: bool = False,
         compile_bf16: bool = False,
     ) -> None:
-        self.weights_cache = WeightsDownloadCache()
-        self.bf16_lora = None
-        self.fp8_lora = None
-
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
 
@@ -243,6 +244,35 @@ class Predictor(BasePredictor):
 
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
+    
+    @torch.inference_mode()
+    def handle_loras(
+        self,
+        go_fast: bool,
+        lora_weights: str | None = None,
+        lora_scale: float = 1.0,
+    ):
+        if go_fast: 
+            model = self.fp8_pipe.model
+            cur_lora = self.fp8_lora
+            self.fp8_lora = lora_weights
+
+        else:
+            model = self.flux
+            cur_lora = self.bf16_lora
+            self.bf16_lora = lora_weights
+
+        if lora_weights:
+            if lora_weights != cur_lora:
+                if cur_lora:
+                    unload_loras(model)
+                lora_path = self.weights_cache.ensure(lora_weights)
+                load_lora(model, lora_path, lora_scale)
+            else:
+                print(f"Lora {lora_weights} already loaded")
+        elif cur_lora:
+            unload_loras(model)
+
 
     @torch.inference_mode()
     def base_predict(
@@ -255,8 +285,6 @@ class Predictor(BasePredictor):
         image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
         seed: Optional[int] = None,
-        lora_weights: str | None = None,
-        lora_scale: float = 1.0,
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -266,16 +294,6 @@ class Predictor(BasePredictor):
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
-
-        if lora_weights:
-            if lora_weights != self.bf16_lora:
-                lora_path = self.weights_cache.ensure(lora_weights)
-                load_lora(self.flux, lora_path, lora_scale)
-            else:
-                print(f"Lora {lora_weights} already loaded")
-        elif self.bf16_lora:
-            unload_loras(self.flux)
-            self.bf16_lora = None
 
         # img2img only works for flux-dev
         if image:
@@ -380,8 +398,6 @@ class Predictor(BasePredictor):
         image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
         seed: Optional[int] = None,
-        lora_weights: str | None = None,
-        lora_scale: float = 1.0,
     ) -> List[Image]:
         """Run a single prediction on the model"""
         print("running quantized prediction")
@@ -392,16 +408,6 @@ class Predictor(BasePredictor):
         if image:
             image = Image.open(image).convert("RGB")
         print("generating")
-
-        if lora_weights:
-            if lora_weights != self.bf16_lora:
-                lora_path = self.weights_cache.ensure(lora_weights)
-                load_lora(self.fp8_pipe.model, lora_path, lora_scale)
-            else:
-                print(f"Lora {lora_weights} already loaded")
-        elif self.fp8_lora:
-            unload_loras(self.fp8_pipe.model)
-            self.fp8_lora = None
 
         return self.fp8_pipe.generate(
             prompt=prompt,
@@ -610,6 +616,8 @@ class SchnellLoraPredictor(Predictor):
         lora_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
     ) -> List[Path]:
+        self.handle_loras(go_fast, lora_weights, lora_scale)
+
         if go_fast:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
@@ -617,8 +625,6 @@ class SchnellLoraPredictor(Predictor):
                 num_outputs,
                 num_inference_steps=self.num_steps,
                 seed=seed,
-                lora_weights=lora_weights,
-                lora_scale=lora_scale,
             )
         else:
             imgs, np_imgs = self.base_predict(
@@ -627,8 +633,6 @@ class SchnellLoraPredictor(Predictor):
                 num_outputs,
                 num_inference_steps=self.num_steps,
                 seed=seed,
-                lora_weights=lora_weights,
-                lora_scale=lora_scale,
             )
 
         return self.postprocess(
@@ -643,6 +647,7 @@ class SchnellLoraPredictor(Predictor):
 class DevLoraPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-dev", compile_fp8=True)
+        self.lora_setup()
 
     def predict(
         self,
@@ -680,6 +685,8 @@ class DevLoraPredictor(Predictor):
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
 
+        self.handle_loras(go_fast, lora_weights, lora_scale)
+
         if go_fast:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
@@ -690,8 +697,6 @@ class DevLoraPredictor(Predictor):
                 image=image,
                 prompt_strength=prompt_strength,
                 seed=seed,
-                lora_weights=lora_weights,
-                lora_scale=lora_scale,
             )
         else:
             imgs, np_imgs = self.base_predict(
@@ -703,8 +708,6 @@ class DevLoraPredictor(Predictor):
                 image=image,
                 prompt_strength=prompt_strength,
                 seed=seed,
-                lora_weights=lora_weights,
-                lora_scale=lora_scale,
             )
 
         return self.postprocess(
