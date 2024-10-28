@@ -116,10 +116,6 @@ SHARED_INPUTS = SharedInputs()
 class Predictor(BasePredictor):
     def setup(self) -> None:
         return
-    
-    def lora_setup(self):
-        self.bf16_lora = None
-        self.fp8_lora = None
 
     def base_setup(
         self,
@@ -128,6 +124,8 @@ class Predictor(BasePredictor):
         compile_bf16: bool = False,
     ) -> None:
         self.weights_cache = WeightsDownloadCache()
+        self.bf16_lora = None
+        self.fp8_lora = None
 
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")

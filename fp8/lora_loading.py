@@ -268,7 +268,7 @@ def convert_diffusers_to_flux_transformer_checkpoint(
             f"single_blocks.{i}.modulation.lin.weight",
         )
 
-        # Q, K, V, mlp
+        # Q, K, V, mlp - note that we don't support only tuning a subset of these at the moment (apply_linear1_lora_weight_to_module assumes all are implemented). ez fix if needed.
         if f"{prefix}{block_prefix}attn.to_q.lora_A.weight" in diffusers_state_dict:
             q_A = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_q.lora_A.weight")
             q_B = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_q.lora_B.weight")
@@ -511,6 +511,7 @@ def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0):
     lora_weights = load_file(lora_path, device="cuda")
     is_kohya = any(".lora_down.weight" in k for k in lora_weights)
 
+    # this is a bit circuitous at the moment but it works 
     if is_kohya:
         lora_weights = _convert_kohya_flux_lora_to_diffusers(lora_weights)
 
