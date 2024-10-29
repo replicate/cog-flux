@@ -10,7 +10,6 @@ build:
 
   python_packages:
     - "numpy<2"
-    - "torch==2.4.1"
     - "einops==0.8.0"
     - "fire==0.6.0"
     - "huggingface-hub==0.24.3"
