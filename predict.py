@@ -103,10 +103,10 @@ class SharedInputs:
         default=None,
     )
     lora_scale: Input = Input(
-        description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1.",
+        description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference; for go_fast we apply a 1.5x multiplier to this value because we've seen best performance with that. You may still need to experiment to find the best value for your particular lora. ",
         default=1.0,
-        le=2.0,
-        ge=-1.0,
+        le=5.0,
+        ge=-5.0,
     )
 
 
@@ -121,6 +121,7 @@ class Predictor(BasePredictor):
         self.weights_cache = WeightsDownloadCache()
         self.bf16_lora = None
         self.fp8_lora = None
+        self.fp8_lora_scale_multiplier = 1.5
 
     def base_setup(
         self,
@@ -256,6 +257,7 @@ class Predictor(BasePredictor):
             model = self.fp8_pipe.model
             cur_lora = self.fp8_lora
             self.fp8_lora = lora_weights
+            lora_scale = lora_scale * self.fp8_lora_scale_multiplier
 
         else:
             model = self.flux
