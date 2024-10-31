@@ -102,11 +102,14 @@ class SharedInputs:
         description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
         default=None,
     )
-    lora_scale: Input = Input(
-        description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference; for go_fast we apply a 1.5x multiplier to this value because we've seen best performance with that. You may still need to experiment to find the best value for your particular lora. ",
-        default=1.0,
-        le=5.0,
-        ge=-5.0,
+    lora_scale: Input = (
+        Input(
+            description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference; for go_fast we apply a 1.5x multiplier to this value because we've seen best performance with that. You may still need to experiment to find the best value for your particular lora. ",
+            default=1.0,
+            le=5.0,
+            ge=-5.0,
+        ),
+    )
     megapixels: Input = Input(
         description="Approximate number of megapixels for generated image",
         choices=["1", "0.25"],
@@ -120,7 +123,7 @@ SHARED_INPUTS = SharedInputs()
 class Predictor(BasePredictor):
     def setup(self) -> None:
         return
-    
+
     def lora_setup(self):
         self.weights_cache = WeightsDownloadCache()
         self.bf16_lora = None
@@ -261,7 +264,7 @@ class Predictor(BasePredictor):
 
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
-    
+
     @torch.inference_mode()
     def handle_loras(
         self,
@@ -269,7 +272,7 @@ class Predictor(BasePredictor):
         lora_weights: str | None = None,
         lora_scale: float = 1.0,
     ):
-        if go_fast: 
+        if go_fast:
             model = self.fp8_pipe.model
             cur_lora = self.fp8_lora
             self.fp8_lora = lora_weights
@@ -290,7 +293,6 @@ class Predictor(BasePredictor):
                 print(f"Lora {lora_weights} already loaded")
         elif cur_lora:
             unload_loras(model)
-
 
     def preprocess(
         self, aspect_ratio: str, seed: Optional[int], megapixels: str

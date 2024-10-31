@@ -36,7 +36,9 @@ class WeightsDownloadCache:
             # here we remove to re-add to the end of the LRU (marking it as recently used)
             self.hits += 1
             self.lru_paths.remove(path)
-        elif not os.path.exists(path): # local dev; sometimes we'll have a lora already downloaded
+        elif not Path.exists(
+            path
+        ):  # local dev; sometimes we'll have a lora already downloaded
             self.misses += 1
 
             while not self._has_enough_space() and len(self.lru_paths) > 0:
