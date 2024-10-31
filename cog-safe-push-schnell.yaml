@@ -9,8 +9,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 1
-        num_inference_steps: 28
-        guidance_scale: 3.5
+        num_inference_steps: 4
         seed: 5259
         output_format: jpg
       match_prompt: A 1024x1024px jpg image of a formula one car
@@ -19,8 +18,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 4
-        num_inference_steps: 10
-        guidance_scale: 1.0
+        num_inference_steps: 4
         seed: 5259
         output_format: png
       match_prompt: Four png images
@@ -29,8 +27,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 1
-        num_inference_steps: 10
-        guidance_scale: 1.0
+        num_inference_steps: 4
         seed: 5259
         output_format: png
         disable_safety_checker: true
@@ -40,8 +37,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 1
-        num_inference_steps: 10
-        guidance_scale: 1.0
+        num_inference_steps: 1
         seed: 5259
         output_format: png
         aspect_ratio: "3:2"
@@ -51,8 +47,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 1
-        num_inference_steps: 28
-        guidance_scale: 3.5
+        num_inference_steps: 4
         seed: 5259
         output_format: jpg
         go_fast: false
@@ -62,8 +57,7 @@ predict:
     - inputs:
         prompt: A formula one car
         num_outputs: 4
-        num_inference_steps: 10
-        guidance_scale: 3.5
+        num_inference_steps: 1
         seed: 5259
         output_format: jpg
         go_fast: false

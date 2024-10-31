@@ -21,18 +21,25 @@ The code in this repo can be used as a template for customizations on FLUX.1, or
 First you need to select which model to run:
 
 ```shell
-$ script/select.sh {dev,schnell}
+script/select.sh {dev,schnell}
 ```
 
 Then you can run a single prediction on the model using:
 
 ```shell
-$ cog predict -i prompt="a cat in a hat"
+cog predict -i prompt="a cat in a hat"
 ```
 
-For more documentation about how to interact with Cog models and push customized FLUX.1 models to Replicate:
-* The [Cog getting started guide](https://cog.run/getting-started/) explains what Cog is and how it works
-* [This guide](https://replicate.com/docs/guides/push-a-model) describes how to push a model to Replicate
+The [Cog getting started guide](https://cog.run/getting-started/) explains what Cog is and how it works.
+
+To deploy it to Replicate, run:
+
+```shell
+cog login
+cog push r8.im/<your-username>/<your-model-name>
+```
+
+Learn more on [the deploy a custom model guide in the Replicate documentation](https://replicate.com/docs/guides/deploy-a-custom-model).
 
 ## Contributing
 

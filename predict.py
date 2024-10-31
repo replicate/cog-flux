@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -107,6 +107,10 @@ class SharedInputs:
         default=1.0,
         le=5.0,
         ge=-5.0,
+    megapixels: Input = Input(
+        description="Approximate number of megapixels for generated image",
+        choices=["1", "0.25"],
+        default="1",
     )
 
 
@@ -128,6 +132,7 @@ class Predictor(BasePredictor):
         flow_model_name: str,
         compile_fp8: bool = False,
         compile_bf16: bool = False,
+        disable_fp8: bool = False,
     ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
@@ -179,13 +184,17 @@ class Predictor(BasePredictor):
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
         )
 
-        self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
-            f"fp8/configs/config-1-{flow_model_name}-h100.json",
-            shared_models=shared_models,
-        )
+        # fp8 only works w/compute capability >= 8.9
+        self.disable_fp8 = disable_fp8 or torch.cuda.get_device_capability() < (8, 9)
 
-        if compile_fp8:
-            self.compile_fp8()
+        if not self.disable_fp8:
+            self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
+                f"fp8/configs/config-1-{flow_model_name}-h100.json",
+                shared_models=shared_models,
+            )
+
+            if compile_fp8:
+                self.compile_fp8()
 
         if compile_bf16:
             self.compile_bf16()
@@ -208,6 +217,13 @@ class Predictor(BasePredictor):
             width, height = self.aspect_ratio_to_width_height(k)
             self.fp8_pipe.generate(
                 prompt="godzilla!", width=width, height=height, num_steps=4, guidance=3
+            )
+            self.fp8_pipe.generate(
+                prompt="godzilla!",
+                width=width // 2,
+                height=height // 2,
+                num_steps=4,
+                guidance=3,
             )
 
         print("compiled in ", time.time() - st)
@@ -276,26 +292,35 @@ class Predictor(BasePredictor):
             unload_loras(model)
 
 
+    def preprocess(
+        self, aspect_ratio: str, seed: Optional[int], megapixels: str
+    ) -> Dict:
+        width, height = ASPECT_RATIOS.get(aspect_ratio)
+        if megapixels == "0.25":
+            width, height = width // 2, height // 2
+
+        if not seed:
+            seed = int.from_bytes(os.urandom(2), "big")
+        print(f"Using seed: {seed}")
+
+        return {"width": width, "height": height, "seed": seed}
+
     @torch.inference_mode()
     def base_predict(
         self,
         prompt: str,
-        aspect_ratio: str,
         num_outputs: int,
         num_inference_steps: int,
         guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
         image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
-        seed: Optional[int] = None,
+        seed: int = None,
+        width: int = 1024,
+        height: int = 1024,
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
         init_image = None
-        width, height = self.aspect_ratio_to_width_height(aspect_ratio)
-
-        if not seed:
-            seed = int.from_bytes(os.urandom(2), "big")
-        print(f"Using seed: {seed}")
 
         # img2img only works for flux-dev
         if image:
@@ -393,23 +418,17 @@ class Predictor(BasePredictor):
     def fp8_predict(
         self,
         prompt: str,
-        aspect_ratio: str,
         num_outputs: int,
         num_inference_steps: int,
         guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
         image: Path = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
-        seed: Optional[int] = None,
+        seed: int = None,
+        width: int = 1024,
+        height: int = 1024,
     ) -> List[Image]:
         """Run a single prediction on the model"""
         print("running quantized prediction")
-        if seed is None:
-            seed = np.random.randint(1, 100000)
-
-        width, height = self.aspect_ratio_to_width_height(aspect_ratio)
-        if image:
-            image = Image.open(image).convert("RGB")
-        print("generating")
 
         return self.fp8_pipe.generate(
             prompt=prompt,
@@ -498,27 +517,36 @@ class SchnellPredictor(Predictor):
         prompt: str = SHARED_INPUTS.prompt,
         aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
         num_outputs: int = SHARED_INPUTS.num_outputs,
+        num_inference_steps: int = Input(
+            description="Number of denoising steps. 4 is recommended, and lower number of steps produce lower quality outputs, faster.",
+            ge=1,
+            le=4,
+            default=4,
+        ),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
         go_fast: bool = SHARED_INPUTS.go_fast,
+        megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
-        if go_fast:
+        hws_kwargs = self.preprocess(aspect_ratio, seed, megapixels)
+
+        if go_fast and not self.disable_fp8:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
-                aspect_ratio,
                 num_outputs,
-                num_inference_steps=self.num_steps,
-                seed=seed,
+                num_inference_steps=num_inference_steps,
+                **hws_kwargs,
             )
         else:
+            if self.disable_fp8:
+                print("running bf16 model, fp8 disabled")
             imgs, np_imgs = self.base_predict(
                 prompt,
-                aspect_ratio,
                 num_outputs,
-                num_inference_steps=self.num_steps,
-                seed=seed,
+                num_inference_steps=num_inference_steps,
+                **hws_kwargs,
             )
 
         return self.postprocess(
@@ -563,32 +591,34 @@ class DevPredictor(Predictor):
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
         go_fast: bool = SHARED_INPUTS.go_fast,
+        megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
+        hws_kwargs = self.preprocess(aspect_ratio, seed, megapixels)
 
-        if go_fast:
+        if go_fast and not self.disable_fp8:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
-                aspect_ratio,
                 num_outputs,
                 num_inference_steps,
                 guidance=guidance,
                 image=image,
                 prompt_strength=prompt_strength,
-                seed=seed,
+                **hws_kwargs,
             )
         else:
+            if self.disable_fp8:
+                print("running bf16 model, fp8 disabled")
             imgs, np_imgs = self.base_predict(
                 prompt,
-                aspect_ratio,
                 num_outputs,
                 num_inference_steps,
                 guidance=guidance,
                 image=image,
                 prompt_strength=prompt_strength,
-                seed=seed,
+                **hws_kwargs,
             )
 
         return self.postprocess(
