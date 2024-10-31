@@ -9,20 +9,6 @@ on:
         type: boolean
         default: true
 
-  # Adding a second workflow trigger with a different name
-  workflow_dispatch:
-    workflows: ["Push LORA Models"]
-    inputs:
-      branch:
-        description: 'Branch to run on'
-        type: string
-        default: 'main'
-        required: true
-      no_push_lora:
-        description: 'Test only, without pushing LORA models to prod'
-        type: boolean
-        default: true
-
 jobs:
   cog-safe-push:
     runs-on: ubuntu-latest-4-cores
