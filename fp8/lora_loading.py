@@ -384,11 +384,9 @@ def apply_linear1_lora_weight_to_module(
         alpha = rank
     else:
         alpha = alpha
-    w_dtype = module_weight.dtype
-    device = module_weight.device
     w_orig = module_weight
-    w_up = lora_A  # .to(dtype=w_dtype, device=device)
-    w_down = lora_B  # .to(dtype=w_dtype, device=device)
+    w_up = lora_A  
+    w_down = lora_B  
 
     if alpha != rank:
         w_up = w_up * alpha / rank
@@ -406,18 +404,13 @@ def apply_linear1_lora_weight_to_module(
     v_down = w_down[3072 * 2 : 3072 * 3]
     mlp_down = w_down[3072 * 3 :]
 
-    # q += lora_scale * torch.mm(q_down, q_up).to(torch.bfloat16)
-    # k += lora_scale * torch.mm(k_down, k_up).to(torch.bfloat16)
-    # v += lora_scale * torch.mm(v_down, v_up).to(torch.bfloat16)
-    # mlp += lora_scale * torch.mm(mlp_down, mlp_up).to(torch.bfloat16)
-
     q = (q.float() + lora_scale * torch.mm(q_down, q_up)).to(torch.bfloat16)
     k = (k.float() + lora_scale * torch.mm(k_down, k_up)).to(torch.bfloat16)
     v = (v.float() + lora_scale * torch.mm(v_down, v_up)).to(torch.bfloat16)
     mlp = (mlp.float() + lora_scale * torch.mm(mlp_down, mlp_up)).to(torch.bfloat16)
 
     fused_weight = torch.cat([q, k, v, mlp], dim=0)
-    return fused_weight  # .to(dtype=w_dtype, device=device)
+    return fused_weight  
 
 
 @torch.inference_mode()
@@ -437,11 +430,9 @@ def apply_attn_qkv_lora_weight_to_module(
         alpha = rank
     else:
         alpha = alpha
-    w_dtype = module_weight.dtype
-    device = module_weight.device
     w_orig = module_weight
-    w_up = lora_A  # .to(dtype=w_dtype, device=device)
-    w_down = lora_B  # .to(dtype=w_dtype, device=device)
+    w_up = lora_A  
+    w_down = lora_B  
 
     if alpha != rank:
         w_up = w_up * alpha / rank
@@ -456,15 +447,12 @@ def apply_attn_qkv_lora_weight_to_module(
     k_down = w_down[3072 : 3072 * 2]
     v_down = w_down[3072 * 2 : 3072 * 3]
 
-    # q += lora_scale * torch.mm(q_down, q_up).to(torch.bfloat16)
-    # k += lora_scale * torch.mm(k_down, k_up).to(torch.bfloat16)
-    # v += lora_scale * torch.mm(v_down, v_up).to(torch.bfloat16)
     q = (q.float() + lora_scale * torch.mm(q_down, q_up)).to(torch.bfloat16)
     k = (k.float() + lora_scale * torch.mm(k_down, k_up)).to(torch.bfloat16)
     v = (v.float() + lora_scale * torch.mm(v_down, v_up)).to(torch.bfloat16)
 
     fused_weight = torch.cat([q, k, v], dim=0)
-    return fused_weight  # .to(dtype=w_dtype, device=device)
+    return fused_weight 
 
 
 @torch.inference_mode()
@@ -489,18 +477,17 @@ def apply_lora_weight_to_module(
         alpha = alpha
 
     w_orig = module_weight
-    w_up = lora_A  # .to(dtype=w_dtype, device=device)
-    w_down = lora_B  # .to(dtype=w_dtype, device=device)
+    w_up = lora_A  
+    w_down = lora_B  
 
     if alpha != rank:
         w_up = w_up * alpha / rank
     if uneven_rank:
         w_down = w_down.repeat_interleave(int(rank_diff), dim=1)
-    #fused_lora = lora_scale * torch.mm(w_down, w_up).to(torch.bfloat16)
-    #fused_weight = w_orig + fused_lora
+
     fused_lora = lora_scale * torch.mm(w_down, w_up)
     fused_weight = (w_orig.float() + fused_lora).to(torch.bfloat16)
-    return fused_weight  # .to(dtype=w_dtype, device=device)
+    return fused_weight  
 
 
 @torch.inference_mode()
@@ -511,7 +498,7 @@ def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0):
     lora_weights = load_file(lora_path, device="cuda")
     is_kohya = any(".lora_down.weight" in k for k in lora_weights)
 
-    # this is a bit circuitous at the moment but it works 
+    # converting to diffusers to convert from diffusers is a bit circuitous at the moment but it works 
     if is_kohya:
         lora_weights = _convert_kohya_flux_lora_to_diffusers(lora_weights)
 
@@ -589,16 +576,15 @@ def apply_lora_to_model(model: Flux, lora_weights: dict, lora_scale: float = 1.0
                 weight_is_f8 = True
                 weight_f16 = (
                     module.float8_data.clone()
-                    #.to(torch.bfloat16)
                     .float()
                     .mul(module.scale_reciprocal)
                     .to(module.weight.device)
                     .to(torch.bfloat16)
                 )
             elif isinstance(module, torch.nn.Linear):
-                weight_f16 = module.weight.clone()  # .detach()
+                weight_f16 = module.weight.clone()  
             elif isinstance(module, CublasLinear):
-                weight_f16 = module.weight.clone()  # .detach()
+                weight_f16 = module.weight.clone()  
             lora_sd = get_lora_for_key(key, lora_weights)
 
             assert weight_f16.dtype == torch.bfloat16, f"{key} is {weight_f16.dtype}, not torch.bfloat16"

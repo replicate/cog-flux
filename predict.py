@@ -104,7 +104,7 @@ class SharedInputs:
     )
     lora_scale: Input = (
         Input(
-            description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference; for go_fast we apply a 1.5x multiplier to this value because we've seen best performance with that. You may still need to experiment to find the best value for your particular lora. ",
+            description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
             default=1.0,
             le=5.0,
             ge=-5.0,
