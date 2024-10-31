@@ -15,6 +15,7 @@ from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 from fp8.flux_pipeline import FluxPipeline
 from fp8.util import LoadedModels
+from fp8.lora_loading import load_lora, unload_loras
 
 import numpy as np
 from einops import rearrange
@@ -32,6 +33,7 @@ from transformers import (
     AutoModelForImageClassification,
     ViTImageProcessor,
 )
+from weights import WeightsDownloadCache
 
 SAFETY_CACHE = Path("/src/safety-cache")
 FEATURE_EXTRACTOR = Path("/src/feature-extractor")
@@ -96,6 +98,18 @@ class SharedInputs:
         description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
         default=True,
     )
+    lora_weights: Input = Input(
+        description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
+        default=None,
+    )
+    lora_scale: Input = (
+        Input(
+            description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
+            default=1.0,
+            le=5.0,
+            ge=-5.0,
+        ),
+    )
     megapixels: Input = Input(
         description="Approximate number of megapixels for generated image",
         choices=["1", "0.25"],
@@ -109,6 +123,12 @@ SHARED_INPUTS = SharedInputs()
 class Predictor(BasePredictor):
     def setup(self) -> None:
         return
+
+    def lora_setup(self):
+        self.weights_cache = WeightsDownloadCache()
+        self.bf16_lora = None
+        self.fp8_lora = None
+        self.fp8_lora_scale_multiplier = 1.5
 
     def base_setup(
         self,
@@ -244,6 +264,35 @@ class Predictor(BasePredictor):
 
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
+
+    @torch.inference_mode()
+    def handle_loras(
+        self,
+        go_fast: bool,
+        lora_weights: str | None = None,
+        lora_scale: float = 1.0,
+    ):
+        if go_fast:
+            model = self.fp8_pipe.model
+            cur_lora = self.fp8_lora
+            self.fp8_lora = lora_weights
+            lora_scale = lora_scale * self.fp8_lora_scale_multiplier
+
+        else:
+            model = self.flux
+            cur_lora = self.bf16_lora
+            self.bf16_lora = lora_weights
+
+        if lora_weights:
+            if lora_weights != cur_lora:
+                if cur_lora:
+                    unload_loras(model)
+                lora_path = self.weights_cache.ensure(lora_weights)
+                load_lora(model, lora_path, lora_scale)
+            else:
+                print(f"Lora {lora_weights} already loaded")
+        elif cur_lora:
+            unload_loras(model)
 
     def preprocess(
         self, aspect_ratio: str, seed: Optional[int], megapixels: str
@@ -572,6 +621,127 @@ class DevPredictor(Predictor):
                 image=image,
                 prompt_strength=prompt_strength,
                 **hws_kwargs,
+            )
+
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+class SchnellLoraPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup("flux-schnell", compile_fp8=True)
+        self.lora_setup()
+
+    def predict(
+        self,
+        prompt: str = SHARED_INPUTS.prompt,
+        aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        num_outputs: int = SHARED_INPUTS.num_outputs,
+        seed: int = SHARED_INPUTS.seed,
+        output_format: str = SHARED_INPUTS.output_format,
+        output_quality: int = SHARED_INPUTS.output_quality,
+        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+        go_fast: bool = SHARED_INPUTS.go_fast,
+        lora_weights: str = SHARED_INPUTS.lora_weights,
+        lora_scale: float = SHARED_INPUTS.lora_scale,
+    ) -> List[Path]:
+        self.handle_loras(go_fast, lora_weights, lora_scale)
+
+        if go_fast:
+            imgs, np_imgs = self.fp8_predict(
+                prompt,
+                aspect_ratio,
+                num_outputs,
+                num_inference_steps=self.num_steps,
+                seed=seed,
+            )
+        else:
+            imgs, np_imgs = self.base_predict(
+                prompt,
+                aspect_ratio,
+                num_outputs,
+                num_inference_steps=self.num_steps,
+                seed=seed,
+            )
+
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+class DevLoraPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup("flux-dev", compile_fp8=True)
+        self.lora_setup()
+
+    def predict(
+        self,
+        prompt: str = SHARED_INPUTS.prompt,
+        aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        image: Path = Input(
+            description="Input image for image to image mode. The aspect ratio of your output will match this image",
+            default=None,
+        ),
+        prompt_strength: float = Input(
+            description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            ge=0.0,
+            le=1.0,
+            default=0.80,
+        ),
+        num_outputs: int = SHARED_INPUTS.num_outputs,
+        num_inference_steps: int = Input(
+            description="Number of denoising steps. Recommended range is 28-50",
+            ge=1,
+            le=50,
+            default=28,
+        ),
+        guidance: float = Input(
+            description="Guidance for generated image", ge=0, le=10, default=3
+        ),
+        seed: int = SHARED_INPUTS.seed,
+        output_format: str = SHARED_INPUTS.output_format,
+        output_quality: int = SHARED_INPUTS.output_quality,
+        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+        go_fast: bool = SHARED_INPUTS.go_fast,
+        lora_weights: str = SHARED_INPUTS.lora_weights,
+        lora_scale: float = SHARED_INPUTS.lora_scale,
+    ) -> List[Path]:
+        if image and go_fast:
+            print("img2img not supported with fp8 quantization; running with bf16")
+            go_fast = False
+
+        self.handle_loras(go_fast, lora_weights, lora_scale)
+
+        if go_fast:
+            imgs, np_imgs = self.fp8_predict(
+                prompt,
+                aspect_ratio,
+                num_outputs,
+                num_inference_steps,
+                guidance=guidance,
+                image=image,
+                prompt_strength=prompt_strength,
+                seed=seed,
+            )
+        else:
+            imgs, np_imgs = self.base_predict(
+                prompt,
+                aspect_ratio,
+                num_outputs,
+                num_inference_steps,
+                guidance=guidance,
+                image=image,
+                prompt_strength=prompt_strength,
+                seed=seed,
             )
 
         return self.postprocess(
