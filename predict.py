@@ -642,6 +642,12 @@ class SchnellLoraPredictor(Predictor):
         prompt: str = SHARED_INPUTS.prompt,
         aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
         num_outputs: int = SHARED_INPUTS.num_outputs,
+        num_inference_steps: int = Input(
+            description="Number of denoising steps. 4 is recommended, and lower number of steps produce lower quality outputs, faster.",
+            ge=1,
+            le=4,
+            default=4,
+        ),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
@@ -657,7 +663,7 @@ class SchnellLoraPredictor(Predictor):
                 prompt,
                 aspect_ratio,
                 num_outputs,
-                num_inference_steps=self.num_steps,
+                num_inference_steps=num_inference_steps,
                 seed=seed,
             )
         else:
@@ -665,7 +671,7 @@ class SchnellLoraPredictor(Predictor):
                 prompt,
                 aspect_ratio,
                 num_outputs,
-                num_inference_steps=self.num_steps,
+                num_inference_steps=num_inference_steps,
                 seed=seed,
             )
 
