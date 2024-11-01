@@ -505,12 +505,44 @@ class Predictor(BasePredictor):
 
         return result == "normal"
 
-    def shared_predict(self, go_fast, *args, **kwargs):
+    def shared_predict(
+        self,
+        go_fast: bool,
+        prompt: str,
+        num_outputs: int,
+        num_inference_steps: int,
+        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
+        image: Path = None,  # img2img for flux-dev
+        prompt_strength: float = 0.8,
+        seed: int = None,
+        width: int = 1024,
+        height: int = 1024,
+    ):
         if go_fast and not self.disable_fp8:
-            return self.fp8_predict(*args, **kwargs)
+            return self.fp8_predict(
+                prompt=prompt,
+                num_outputs=num_outputs,
+                num_inference_steps=num_inference_steps,
+                guidance=guidance,
+                image=image,
+                prompt_strength=prompt_strength,
+                seed=seed,
+                width=width,
+                height=height,
+            )
         if self.disable_fp8:
             print("running bf16 model, fp8 disabled")
-        return self.base_predict(*args, **kwargs)
+        return self.base_predict(
+            prompt=prompt,
+            num_outputs=num_outputs,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
+            image=image,
+            prompt_strength=prompt_strength,
+            seed=seed,
+            width=width,
+            height=height,
+        )
 
 
 class SchnellPredictor(Predictor):
@@ -646,7 +678,6 @@ class SchnellLoraPredictor(Predictor):
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
-            aspect_ratio,
             num_outputs,
             num_inference_steps=self.num_steps,
             seed=seed,
