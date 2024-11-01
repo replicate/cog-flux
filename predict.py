@@ -169,6 +169,7 @@ class Predictor(BasePredictor):
         self.offload = total_mem < 48 * 1024**3
         if self.offload:
             print("GPU memory is:", total_mem / 1024**3, ", offloading models")
+            compile_fp8 = False
 
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
