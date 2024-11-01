@@ -19,3 +19,6 @@ __pycache__
 /model-cache
 /safety-cache
 /falcon-cache
+
+/FLUX.1-dev
+/test-weights
