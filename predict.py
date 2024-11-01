@@ -679,7 +679,7 @@ class SchnellLoraPredictor(Predictor):
             go_fast,
             prompt,
             num_outputs,
-            num_inference_steps=self.num_steps,
+            num_inference_steps=num_inference_steps,
             seed=seed,
             width=width,
             height=height,
