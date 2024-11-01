@@ -102,13 +102,11 @@ class SharedInputs:
         description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
         default=None,
     )
-    lora_scale: Input = (
-        Input(
+    lora_scale: Input = Input(
             description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
             default=1.0,
             le=5.0,
             ge=-5.0,
-        ),
     )
     megapixels: Input = Input(
         description="Approximate number of megapixels for generated image",
