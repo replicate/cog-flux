@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Tuple, Optional
 
 import torch
 
@@ -292,18 +292,12 @@ class Predictor(BasePredictor):
         elif cur_lora:
             unload_loras(model)
 
-    def preprocess(
-        self, aspect_ratio: str, seed: Optional[int], megapixels: str
-    ) -> Dict:
+    def preprocess(self, aspect_ratio: str, megapixels: str = "1") -> Tuple[int, int]:
         width, height = ASPECT_RATIOS.get(aspect_ratio)
         if megapixels == "0.25":
             width, height = width // 2, height // 2
 
-        if not seed:
-            seed = int.from_bytes(os.urandom(2), "big")
-        print(f"Using seed: {seed}")
-
-        return {"width": width, "height": height, "seed": seed}
+        return (width, height)
 
     @torch.inference_mode()
     def base_predict(
@@ -321,6 +315,10 @@ class Predictor(BasePredictor):
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
         init_image = None
+
+        if not seed:
+            seed = int.from_bytes(os.urandom(2), "big")
+        print(f"Using seed: {seed}")
 
         # img2img only works for flux-dev
         if image:
@@ -530,14 +528,15 @@ class SchnellPredictor(Predictor):
         go_fast: bool = SHARED_INPUTS.go_fast,
         megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
-        hws_kwargs = self.preprocess(aspect_ratio, seed, megapixels)
-
+        width, height = self.preprocess(aspect_ratio, megapixels)
         if go_fast and not self.disable_fp8:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
                 num_outputs,
                 num_inference_steps=num_inference_steps,
-                **hws_kwargs,
+                seed=seed,
+                width=width,
+                height=height,
             )
         else:
             if self.disable_fp8:
@@ -546,7 +545,9 @@ class SchnellPredictor(Predictor):
                 prompt,
                 num_outputs,
                 num_inference_steps=num_inference_steps,
-                **hws_kwargs,
+                seed=seed,
+                width=width,
+                height=height,
             )
 
         return self.postprocess(
@@ -596,7 +597,7 @@ class DevPredictor(Predictor):
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
-        hws_kwargs = self.preprocess(aspect_ratio, seed, megapixels)
+        width, height = self.preprocess(aspect_ratio, megapixels)
 
         if go_fast and not self.disable_fp8:
             imgs, np_imgs = self.fp8_predict(
@@ -606,7 +607,9 @@ class DevPredictor(Predictor):
                 guidance=guidance,
                 image=image,
                 prompt_strength=prompt_strength,
-                **hws_kwargs,
+                seed=seed,
+                width=width,
+                height=height,
             )
         else:
             if self.disable_fp8:
@@ -618,7 +621,9 @@ class DevPredictor(Predictor):
                 guidance=guidance,
                 image=image,
                 prompt_strength=prompt_strength,
-                **hws_kwargs,
+                seed=seed,
+                width=width,
+                height=height,
             )
 
         return self.postprocess(
@@ -656,6 +661,8 @@ class SchnellLoraPredictor(Predictor):
     ) -> List[Path]:
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
+        width, height = self.preprocess(aspect_ratio)
+
         if go_fast:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
@@ -663,6 +670,8 @@ class SchnellLoraPredictor(Predictor):
                 num_outputs,
                 num_inference_steps=num_inference_steps,
                 seed=seed,
+                width=width,
+                height=height,
             )
         else:
             imgs, np_imgs = self.base_predict(
@@ -671,6 +680,8 @@ class SchnellLoraPredictor(Predictor):
                 num_outputs,
                 num_inference_steps=num_inference_steps,
                 seed=seed,
+                width=width,
+                height=height,
             )
 
         return self.postprocess(
@@ -725,27 +736,31 @@ class DevLoraPredictor(Predictor):
 
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
+        width, height = self.preprocess(aspect_ratio)
+
         if go_fast:
             imgs, np_imgs = self.fp8_predict(
                 prompt,
-                aspect_ratio,
                 num_outputs,
                 num_inference_steps,
                 guidance=guidance,
                 image=image,
                 prompt_strength=prompt_strength,
                 seed=seed,
+                width=width,
+                height=height,
             )
         else:
             imgs, np_imgs = self.base_predict(
                 prompt,
-                aspect_ratio,
                 num_outputs,
                 num_inference_steps,
                 guidance=guidance,
                 image=image,
                 prompt_strength=prompt_strength,
                 seed=seed,
+                width=width,
+                height=height,
             )
 
         return self.postprocess(
