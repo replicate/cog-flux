@@ -125,7 +125,9 @@ class Predictor(BasePredictor):
     def lora_setup(self):
         self.weights_cache = WeightsDownloadCache()
         self.bf16_lora = None
+        self.bf16_lora_scale = None
         self.fp8_lora = None
+        self.fp8_lora_scale = None
         self.fp8_lora_scale_multiplier = 1.5
 
     def base_setup(
@@ -275,14 +277,19 @@ class Predictor(BasePredictor):
             cur_lora = self.fp8_lora
             self.fp8_lora = lora_weights
             lora_scale = lora_scale * self.fp8_lora_scale_multiplier
+            cur_scale = self.fp8_lora_scale
+            self.fp8_lora_scale = lora_scale
 
         else:
             model = self.flux
             cur_lora = self.bf16_lora
             self.bf16_lora = lora_weights
+            cur_scale = self.bf16_lora_scale
+            self.bf16_lora_scale = lora_scale
 
         if lora_weights:
-            if lora_weights != cur_lora:
+            # since we merge weights, need to reload for change in scale.
+            if lora_weights != cur_lora or lora_scale != cur_scale:
                 if cur_lora:
                     unload_loras(model)
                 lora_path = self.weights_cache.ensure(lora_weights)
