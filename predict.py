@@ -701,10 +701,11 @@ class SchnellLoraPredictor(Predictor):
         go_fast: bool = SHARED_INPUTS.go_fast,
         lora_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
+        megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
-        width, height = self.preprocess(aspect_ratio)
+        width, height = self.preprocess(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
@@ -760,6 +761,7 @@ class DevLoraPredictor(Predictor):
         go_fast: bool = SHARED_INPUTS.go_fast,
         lora_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
+        megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
@@ -767,7 +769,7 @@ class DevLoraPredictor(Predictor):
 
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
-        width, height = self.preprocess(aspect_ratio)
+        width, height = self.preprocess(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
