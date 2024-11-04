@@ -288,7 +288,7 @@ class Predictor(BasePredictor):
             self.bf16_lora_scale = lora_scale
 
         if lora_weights:
-            # since we merge weights, need to reload for change in scale. 
+            # since we merge weights, need to reload for change in scale.
             if lora_weights != cur_lora or lora_scale != cur_scale:
                 if cur_lora:
                     unload_loras(model)
