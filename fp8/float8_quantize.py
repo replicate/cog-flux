@@ -275,16 +275,38 @@ class F8Linear(nn.Module):
         prev_dims = x.shape[:-1]
         x = x.view(-1, self.in_features)
 
-        # float8 matmul, much faster than float16 matmul w/ float32 accumulate on ADA devices!
-        out = torch._scaled_mm(  # noqa
-            x,
-            self.float8_data.T,
-            scale_a=self.input_scale_reciprocal,
-            scale_b=self.scale_reciprocal,
-            bias=self.bias,
-            out_dtype=self.weight.dtype,
-            use_fast_accum=True,
-        )
+        device = x.device
+        if x.device.type != 'cpu' and torch.cuda.get_device_capability(x.device) >= (8, 9):
+            # float8 matmul, much faster than float16 matmul w/ float32 accumulate on ADA devices!
+            out = torch._scaled_mm(  # noqa
+                x,
+                self.float8_data.T,
+                scale_a=self.input_scale_reciprocal,
+                scale_b=self.scale_reciprocal,
+                bias=self.bias,
+                out_dtype=self.weight.dtype,
+                use_fast_accum=True,
+            )
+        else:
+            # Plain matrix multiplication for non-ADA devices
+            # Assuming x is in float8 and self.float8_data is in float8 as well
+            # Convert to float32, perform the multiplication, and then apply scaling and bias if necessary
+
+            # Convert float8 to float32 for the multiplication
+            x_float32 = x.to(torch.float32)
+            float8_data_float32 = self.float8_data.T.to(torch.float32)
+
+            # Regular matrix multiplication
+            out = torch.matmul(x_float32, float8_data_float32)
+
+            # Scale the output accordingly
+            out = out * (self.input_scale_reciprocal * self.scale_reciprocal)
+
+            # Add bias if it exists
+            if self.bias is not None:
+                out += self.bias
+                out = out.to(self.weight.dtype)
+
         if IS_TORCH_2_4:
             out = out[0]
         return out.view(*prev_dims, self.out_features)

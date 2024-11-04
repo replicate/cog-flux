@@ -165,7 +165,11 @@ class Predictor(BasePredictor):
         self.falcon_processor = ViTImageProcessor.from_pretrained(FALCON_MODEL_NAME)
 
         # need > 48 GB of ram to store all models in VRAM
-        self.offload = "A40" in gpu_name
+        total_mem = torch.cuda.get_device_properties(0).total_memory
+        self.offload = total_mem < 48 * 1024**3
+        if self.offload:
+            print("GPU memory is:", total_mem / 1024**3, ", offloading models")
+            compile_fp8 = False
 
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
@@ -187,13 +191,32 @@ class Predictor(BasePredictor):
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
         )
 
-        # fp8 only works w/compute capability >= 8.9
-        self.disable_fp8 = disable_fp8 or torch.cuda.get_device_capability() < (8, 9)
+        self.disable_fp8 = disable_fp8
 
         if not self.disable_fp8:
+            if compile_fp8:
+                extra_args = {
+                    "compile_whole_model": True,
+                    "compile_extras": True,
+                    "compile_blocks": True,
+                }
+            else:
+                extra_args = {
+                    "compile_whole_model": False,
+                    "compile_extras": False,
+                    "compile_blocks": False,
+                }
+
+            if self.offload:
+                extra_args |= {
+                    "offload_text_encoder": True,
+                    "offload_vae": True,
+                    "offload_flow": True,
+                }
             self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
                 f"fp8/configs/config-1-{flow_model_name}-h100.json",
                 shared_models=shared_models,
+                **extra_args,
             )
 
             if compile_fp8:
