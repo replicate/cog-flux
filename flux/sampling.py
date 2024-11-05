@@ -1,5 +1,5 @@
 import math
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 from einops import rearrange, repeat
@@ -104,7 +104,8 @@ def denoise_single_item(
     vec: Tensor,
     timesteps: list[float],
     guidance: float = 4.0,
-    compile_run: bool = False
+    compile_run: bool = False,
+    mask: Optional[Tensor] = None,
 ):
     img = img.unsqueeze(0)
     img_ids = img_ids.unsqueeze(0)
@@ -133,6 +134,9 @@ def denoise_single_item(
         )
 
         img = img + (t_prev - t_curr) * pred.squeeze(0)
+
+        if mask:
+            
 
     return img, model
 

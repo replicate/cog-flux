@@ -823,6 +823,7 @@ class BigPredictor(BasePredictor):
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
         go_fast: bool = SHARED_INPUTS.go_fast,
+        megapixels: str = SHARED_INPUTS.megapixels,
         lora_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
         extra_lora: str = Input(
@@ -846,23 +847,21 @@ class BigPredictor(BasePredictor):
                 go_fast = False
         else:
             height, width = model.preprocess(aspect_ratio, megapixels=megapixels)
-
-        if aspect_r
             
 
-        if mask or aspect_ratio == 'custom' or extra_lora:
+        if extra_lora and go_fast:
+            print("Multiple loras not supported in fp8, running in bf16")
             go_fast = False
 
         model.handle_loras(go_fast, lora_weights, lora_scale)
         
         if extra_lora:
-            print("Multiple loras not supported in fp8, running in bf16")
-            model.add_loras(False, extra_lora, extra_lora_scale)
+            # extra_lora - this is actually fairly complicated. we're going to break this. 
+            # TODO: model.cram_loras_in_there()
         
-        
-
         # mask - would need to add inpainting support. le sigh. 
-        # extra_lora - this is actually fairly complicated. we're going to break this. 
+        # option 1 - implement this
+        # option 2 - just yank it, I guess? ugh. No, our fp8 compilation framework won't like that. do the implementation, that's better. 
 
 
 class TestPredictor(Predictor):
