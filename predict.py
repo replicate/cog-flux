@@ -125,20 +125,26 @@ class Predictor(BasePredictor):
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
         # we still need to load the encoder but it's better to avoid loading the decoder twice
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
-        # if False and os.path.exists("decoder.engine"):
-        #     t = time.time()
-        #     self.ae.decoder = torch.export.load("decoder.engine").module()
-        #     print("loading decoder took", time.time()-t)
-        # else:
-        #     #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
-        #     t = time.time()
-        #     inputs = [torch.randn([1, 16, 128, 128], device="cuda")] # dec
-        #     self.ae.decoder.up_descending # access
-        #     self.orig_decoder = self.ae.decoder
-        #     dec = torch_tensorrt.compile(self.ae.decoder, inputs=inputs, options={"truncate_long_and_double": True})
-        #     torch_tensorrt.save(dec, "decoder.engine", inputs=inputs)
-        #     print("compiling and saving decoder took", time.time()-t)
-        #     self.ae.decoder = dec
+        if False and os.path.exists("decoder.engine"):
+            t = time.time()
+            self.ae.decoder = torch.export.load("decoder.engine").module()
+            print("loading decoder took", time.time()-t)
+        else:
+            #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
+            t = time.time()
+            inputs = [torch.randn([1, 16, 128, 128], device="cuda")] # dec
+            self.ae.decoder.up_descending # access
+            self.orig_decoder = self.ae.decoder
+            base = {"truncate_long_and_double": True}
+            best = {
+                "num_avg_timing_iters": 2,
+                "use_fast_partitioner": False,
+                "optimization_level": 5,
+            }
+            dec = torch_tensorrt.compile(self.ae.decoder, inputs=inputs, options=base | best)
+            torch_tensorrt.save(dec, "decoder.engine", inputs=inputs)
+            print("compiling and saving decoder took", time.time()-t)
+            self.ae.decoder = dec
 
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
@@ -413,4 +419,10 @@ def acomp():
     ae = {"ae.decoder": specs["ae.decoder"]}
     tracer.compile_module(p, ae, offload=False)
     return trac, p
+
+def basic():
+    p = SchnellPredictor()
+    p.setup()
+    return p
+
 
