@@ -40,6 +40,9 @@ FALCON_MODEL_URL = (
     "https://weights.replicate.delivery/default/falconai/nsfw-image-detection.tar"
 )
 
+DECODER_URL = "https://weights.replicate.delivery/default/official-models/flux/ae/decoder.engine"
+DECODER_PATH = "model-cache/ae/decoder.engine"
+
 # Suppress diffusers nsfw warnings
 logging.getLogger("diffusers").setLevel(logging.CRITICAL)
 logging.getLogger("transformers").setLevel(logging.CRITICAL)
@@ -117,18 +120,14 @@ class Predictor(BasePredictor):
         self.offload = "A40" in gpu_name
 
         device = "cuda"
-        # self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
-        # inp = [torch.rand([1, 3, 1024, 1024], device="cuda")]
-        # opt_ae = torch_tensorrt.compile(self.ae, inputs=inp, options={"truncate_long_and_double": True})
-        # torch_tensorrt.save(opt_ae, "autoencoder.engine", inputs=inp)
-        # self.ae = opt_ae
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
-        # we still need to load the encoder but it's better to avoid loading the decoder twice
+        # we still need to load the encoder but it would be better to avoid loading the decoder twice
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
-        if False and os.path.exists("decoder.engine"):
+        if not os.getenv("COMPILE_ENGINE"):
+            download_weights(DECODER_URL, DECODER_PATH)
             t = time.time()
-            self.ae.decoder = torch.export.load("decoder.engine").module()
-            print("loading decoder took", time.time()-t)
+            self.ae.decoder = torch.export.load(DECODER_PATH).module()
+            print(f"loading decoder took {time.time() - t.3f}s")
         else:
             #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
             t = time.time()
@@ -155,9 +154,6 @@ class Predictor(BasePredictor):
         self.shift = self.flow_model_name != "flux-schnell"
         self.compile_run = False
         if compile:
-            # this is just for decode()
-            # inp = [torch.rand([1, 16, 128, 128])]
-            # this is for forward()
             #self.ae = torch.compile(self.ae, backend="tensorrt",options={ "truncate_long_and_double": True})
             torch._inductor.config.fallback_random = True
             #self.compile_run = True
@@ -399,14 +395,14 @@ def comp():
     return p
  
 p_args = dict(
-                prompt="a cool dog",
-                aspect_ratio="1:1",
-                num_outputs=1,
-                output_format="png",
-                output_quality=80,
-                disable_safety_checker=True,
-                seed=123,
-             )
+    prompt="a cool dog",
+    aspect_ratio="1:1",
+    num_outputs=1,
+    output_format="png",
+    output_quality=80,
+    disable_safety_checker=True,
+    seed=123,
+)
 
 def acomp():
     p = SchnellPredictor()
@@ -424,5 +420,3 @@ def basic():
     p = SchnellPredictor()
     p.setup()
     return p
-
-
