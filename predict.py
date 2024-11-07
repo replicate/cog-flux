@@ -117,25 +117,28 @@ class Predictor(BasePredictor):
         self.offload = "A40" in gpu_name
 
         device = "cuda"
-        self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
-        inp = [torch.rand([1, 3, 1024, 1024], device="cuda")]
-        opt_ae = torch_tensorrt.compile(self.ae, inputs=inp, options={"truncate_long_and_double": True})
-        torch_tensorrt.save(opt_ae, "autoencoder.engine", inputs=inp)
-        self.ae = opt_ae
+        # self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
+        # inp = [torch.rand([1, 3, 1024, 1024], device="cuda")]
+        # opt_ae = torch_tensorrt.compile(self.ae, inputs=inp, options={"truncate_long_and_double": True})
+        # torch_tensorrt.save(opt_ae, "autoencoder.engine", inputs=inp)
+        # self.ae = opt_ae
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
+        # we still need to load the encoder but it's better to avoid loading the decoder twice
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
-        if os.path.exists("decoder.engine"):
-            t = time.time()
-            self.ae.decoder = torch.export.load("decoder.engine").module()
-            print("loading decoder took", time.time()-t)
-        else:
-            #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
-            t = time.time()
-            inputs = [torch.randn([1, 16, 128, 128], device="cuda")] # dec
-            dec = torch_tensorrt.compile(self.ae.decoder, inputs=inputs, options={"truncate_long_and_double": True})
-            torch_tensorrt.save(dec, "decoder.engine", inputs=inputs)
-            print("compiling and saving decoder took", time.time()-t)
-            self.ae.decoder = dec
+        # if False and os.path.exists("decoder.engine"):
+        #     t = time.time()
+        #     self.ae.decoder = torch.export.load("decoder.engine").module()
+        #     print("loading decoder took", time.time()-t)
+        # else:
+        #     #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
+        #     t = time.time()
+        #     inputs = [torch.randn([1, 16, 128, 128], device="cuda")] # dec
+        #     self.ae.decoder.up_descending # access
+        #     self.orig_decoder = self.ae.decoder
+        #     dec = torch_tensorrt.compile(self.ae.decoder, inputs=inputs, options={"truncate_long_and_double": True})
+        #     torch_tensorrt.save(dec, "decoder.engine", inputs=inputs)
+        #     print("compiling and saving decoder took", time.time()-t)
+        #     self.ae.decoder = dec
 
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
@@ -398,3 +401,16 @@ p_args = dict(
                 disable_safety_checker=True,
                 seed=123,
              )
+
+def acomp():
+    p = SchnellPredictor()
+    p.setup()
+    import tracer
+    trac = tracer.ShapeTracer(p)
+    with trac.trace():
+        p.predict(**p_args)
+    specs = trac.determine_modules_to_compile()
+    ae = {"ae.decoder": specs["ae.decoder"]}
+    tracer.compile_module(p, ae, offload=False)
+    return trac, p
+
