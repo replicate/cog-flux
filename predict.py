@@ -124,10 +124,11 @@ class Predictor(BasePredictor):
         # we still need to load the encoder but it would be better to avoid loading the decoder twice
         self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
         if not os.getenv("COMPILE_ENGINE"):
-            download_weights(DECODER_URL, DECODER_PATH)
+            if not os.path.exists(DECODER_PATH):
+                download_weights(DECODER_URL, DECODER_PATH)
             t = time.time()
             self.ae.decoder = torch.export.load(DECODER_PATH).module()
-            print(f"loading decoder took {time.time() - t.3f}s")
+            print(f"loading decoder took {time.time() - t:.3f}s")
         else:
             #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
             t = time.time()
