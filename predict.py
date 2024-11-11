@@ -1,3 +1,4 @@
+import contextlib
 import os
 import time
 from typing import Any, Tuple, Optional
@@ -136,8 +137,10 @@ class Predictor(BasePredictor):
         compile_fp8: bool = False,
         compile_bf16: bool = False,
         disable_fp8: bool = False,
+        enable_profiling: bool = False,
     ) -> None:
         self.flow_model_name = flow_model_name
+        self.enable_profiling = enable_profiling
         print(f"Booting model {self.flow_model_name}")
 
         gpu_name = (
@@ -477,6 +480,7 @@ class Predictor(BasePredictor):
         output_format: str,
         output_quality: int,
         np_images: Optional[List[Image]] = None,
+        profile: Optional[Path] = None,
     ) -> List[Path]:
         has_nsfw_content = [False] * len(images)
 
@@ -513,6 +517,8 @@ class Predictor(BasePredictor):
             )
 
         print(f"Total safe images: {len(output_paths)} out of {len(images)}")
+        if profile:
+            output_paths.append(profile)
         return output_paths
 
     def run_safety_checker(self, images, np_images):
@@ -547,32 +553,48 @@ class Predictor(BasePredictor):
         seed: int = None,
         width: int = 1024,
         height: int = 1024,
-    ):
-        if go_fast and not self.disable_fp8:
-            return self.fp8_predict(
-                prompt=prompt,
-                num_outputs=num_outputs,
-                num_inference_steps=num_inference_steps,
-                guidance=guidance,
-                image=image,
-                prompt_strength=prompt_strength,
-                seed=seed,
-                width=width,
-                height=height,
+    ) -> Tuple[List[Image.Image], Optional[List[np.ndarray]], Optional[Path]]:
+        if self.enable_profiling:
+            profiler = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
             )
-        if self.disable_fp8:
-            print("running bf16 model, fp8 disabled")
-        return self.base_predict(
-            prompt=prompt,
-            num_outputs=num_outputs,
-            num_inference_steps=num_inference_steps,
-            guidance=guidance,
-            image=image,
-            prompt_strength=prompt_strength,
-            seed=seed,
-            width=width,
-            height=height,
-        )
+        else:
+            profiler = contextlib.nullcontext()
+
+        with profiler:
+            if go_fast and not self.disable_fp8:
+                imgs, np_imgs = self.fp8_predict(
+                    prompt=prompt,
+                    num_outputs=num_outputs,
+                    num_inference_steps=num_inference_steps,
+                    guidance=guidance,
+                    image=image,
+                    prompt_strength=prompt_strength,
+                    seed=seed,
+                    width=width,
+                    height=height,
+                )
+            else:
+                if self.disable_fp8:
+                    print("running bf16 model, fp8 disabled")
+                imgs, np_imgs = self.base_predict(
+                    prompt=prompt,
+                    num_outputs=num_outputs,
+                    num_inference_steps=num_inference_steps,
+                    guidance=guidance,
+                    image=image,
+                    prompt_strength=prompt_strength,
+                    seed=seed,
+                    width=width,
+                    height=height,
+                )
+        if isinstance(profiler, torch.profiler.profile):
+            profiler.export_chrome_trace("chrome-trace.json")
+            return imgs, np_imgs, Path("chrome-trace.json")
+        return imgs, np_imgs, None
 
 
 class SchnellPredictor(Predictor):
@@ -598,7 +620,7 @@ class SchnellPredictor(Predictor):
         megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
         width, height = self.preprocess(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
+        imgs, np_imgs, profile = self.shared_predict(
             go_fast,
             prompt,
             num_outputs,
@@ -614,6 +636,7 @@ class SchnellPredictor(Predictor):
             output_format,
             output_quality,
             np_images=np_imgs,
+            profile=profile,
         )
 
 
@@ -656,7 +679,7 @@ class DevPredictor(Predictor):
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
         width, height = self.preprocess(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
+        imgs, np_imgs, profile = self.shared_predict(
             go_fast,
             prompt,
             num_outputs,
@@ -675,6 +698,7 @@ class DevPredictor(Predictor):
             output_format,
             output_quality,
             np_images=np_imgs,
+            profile=profile,
         )
 
 
@@ -706,7 +730,7 @@ class SchnellLoraPredictor(Predictor):
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
         width, height = self.preprocess(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
+        imgs, np_imgs, profile = self.shared_predict(
             go_fast,
             prompt,
             num_outputs,
@@ -722,6 +746,7 @@ class SchnellLoraPredictor(Predictor):
             output_format,
             output_quality,
             np_images=np_imgs,
+            profile=profile,
         )
 
 
@@ -770,7 +795,7 @@ class DevLoraPredictor(Predictor):
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
         width, height = self.preprocess(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
+        imgs, np_imgs, profile = self.shared_predict(
             go_fast,
             prompt,
             num_outputs,
@@ -789,6 +814,7 @@ class DevLoraPredictor(Predictor):
             output_format,
             output_quality,
             np_images=np_imgs,
+            profile=profile,
         )
 
 
