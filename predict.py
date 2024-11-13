@@ -1,4 +1,7 @@
+import torch_tensorrt
 import os
+#os.environ["TORCH_LOGS"] = "+dynamic"
+#os.environ["TORCH_COMPILE_DEBUG"] = "1"
 import time
 from typing import Any, Tuple, Optional
 
@@ -45,6 +48,9 @@ FALCON_MODEL_CACHE = Path("/src/falcon-cache")
 FALCON_MODEL_URL = (
     "https://weights.replicate.delivery/default/falconai/nsfw-image-detection.tar"
 )
+
+DECODER_URL = "https://weights.replicate.delivery/default/official-models/flux/ae/decoder.engine"
+DECODER_PATH = "model-cache/ae/decoder.engine"
 
 # Suppress diffusers nsfw warnings
 logging.getLogger("diffusers").setLevel(logging.CRITICAL)
@@ -173,15 +179,37 @@ class Predictor(BasePredictor):
 
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
+        # we still need to load the encoder but it would be better to avoid loading the decoder twice
+        self.ae = load_ae(self.flow_model_name, device="cpu" if self.offload else device)
+        if not os.getenv("COMPILE_ENGINE"):
+            if not os.path.exists(DECODER_PATH):
+                download_weights(DECODER_URL, DECODER_PATH)
+            t = time.time()
+            self.ae.decoder = torch.export.load(DECODER_PATH).module()
+            print(f"loading decoder took {time.time() - t:.3f}s")
+        else:
+            #inputs = [torch.randn([1, 3, 1024, 1024]) # enc/dec
+            t = time.time()
+            inputs = [torch.randn([1, 16, 128, 128], device="cuda")] # dec
+            self.ae.decoder.up_descending # access
+            self.orig_decoder = self.ae.decoder
+            base = {"truncate_long_and_double": True}
+            best = {
+                "num_avg_timing_iters": 2,
+                "use_fast_partitioner": False,
+                "optimization_level": 5,
+            }
+            dec = torch_tensorrt.compile(self.ae.decoder, inputs=inputs, options=base | best)
+            torch_tensorrt.save(dec, "decoder.engine", inputs=inputs)
+            print("compiling and saving decoder took", time.time()-t)
+            self.ae.decoder = dec
+
         self.t5 = load_t5(device, max_length=max_length)
         self.clip = load_clip(device)
         self.flux = load_flow_model(
             self.flow_model_name, device="cpu" if self.offload else device
         )
         self.flux = self.flux.eval()
-        self.ae = load_ae(
-            self.flow_model_name, device="cpu" if self.offload else device
-        )
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
