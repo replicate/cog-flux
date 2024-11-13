@@ -4,7 +4,7 @@ import os
 import random
 import shutil
 import warnings
-from typing import TYPE_CHECKING, Callable, List
+from typing import TYPE_CHECKING, Callable, List, Tuple
 
 import numpy as np
 from PIL import Image
@@ -386,7 +386,7 @@ class FluxPipeline:
         return im
 
     @torch.inference_mode()
-    def as_img_tensor(self, x: torch.Tensor) -> io.BytesIO:
+    def as_img_tensor(self, x: torch.Tensor) -> Tuple[List[Image.Image], List[np.ndarray]]:
         """Converts the image tensor to bytes."""
         # bring into PIL format and save
         num_images = x.shape[0]
@@ -550,7 +550,7 @@ class FluxPipeline:
         num_images: int = 1,
         jpeg_quality: int = 99,
         compiling: bool = False,
-    ) -> io.BytesIO:
+    ) -> Tuple[List[Image.Image], List[np.ndarray]]:
         """
         Generate images based on the given prompt and parameters.
 
