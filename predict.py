@@ -95,7 +95,7 @@ class SharedInputs:
         default=False,
     )
     go_fast: Input = Input(
-        description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
+        description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16. Note that outputs will not be deterministic when this is enabled, even if you set a seed.",
         default=True,
     )
     lora_weights: Input = Input(
