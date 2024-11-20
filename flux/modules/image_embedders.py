@@ -77,31 +77,31 @@ class CannyImageEncoder(ImageEncoder):
         return canny.to(self.device)
 
 
-class RemixImageEncoder(nn.Module):
+class ReduxImageEncoder(nn.Module):
     siglip_model_name = "google/siglip-so400m-patch14-384"
 
     def __init__(
         self,
         device,
-        remix_dim: int = 1152,
+        redux_dim: int = 1152,
         txt_in_features: int = 4096,
-        remix_path: str | None = os.getenv("FLUX_REMIX"),
+        redux_path: str | None = os.getenv("FLUX_REDUX"),
         siglip_path: str | None = siglip_model_name,
         dtype=torch.bfloat16,
     ) -> None:
-        assert remix_path is not None, "Remix path must be provided"
+        assert redux_path is not None, "Redux path must be provided"
 
         super().__init__()
 
-        self.remix_dim = remix_dim
+        self.redux_dim = redux_dim
         self.device = device if isinstance(device, torch.device) else torch.device(device)
         self.dtype = dtype
 
         with self.device:
-            self.remix_up = nn.Linear(remix_dim, txt_in_features * 3, dtype=dtype)
-            self.remix_down = nn.Linear(txt_in_features * 3, txt_in_features, dtype=dtype)
+            self.redux_up = nn.Linear(redux_dim, txt_in_features * 3, dtype=dtype)
+            self.redux_down = nn.Linear(txt_in_features * 3, txt_in_features, dtype=dtype)
 
-            sd = load_sft(remix_path, device=str(device))
+            sd = load_sft(redux_path, device=str(device))
             missing, unexpected = self.load_state_dict(sd, strict=False, assign=True)
             print_load_warning(missing, unexpected)
 
@@ -114,6 +114,6 @@ class RemixImageEncoder(nn.Module):
 
         _encoded_x = self.siglip(**imgs.to(device=self.device, dtype=self.dtype)).last_hidden_state
 
-        projected_x = self.remix_down(nn.functional.silu(self.remix_up(_encoded_x)))
+        projected_x = self.redux_down(nn.functional.silu(self.redux_up(_encoded_x)))
 
         return projected_x

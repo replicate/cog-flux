@@ -20,7 +20,7 @@ from flux.sampling import (
     get_noise,
     get_schedule,
     prepare,
-    prepare_remix,
+    prepare_redux,
     unpack,
 )
 from fp8.flux_pipeline import FluxPipeline
@@ -988,7 +988,7 @@ class _ReduxPredictor(Predictor):
         self.disable_fp8 = True
 
     def prepare(self, x, prompt):
-        return prepare_remix(
+        return prepare_redux(
             self.t5,
             self.clip,
             x,
