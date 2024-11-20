@@ -105,7 +105,7 @@ configs = {
             shift_factor=0.1159,
         ),
     ),
-    "flux-dev-canny": ModelSpec(
+    "flux-canny-dev": ModelSpec(
         ckpt_path=DEV_CANNY_CACHE,
         ckpt_url=DEV_CANNY_URL,
         params=FluxParams(
@@ -137,7 +137,7 @@ configs = {
             shift_factor=0.1159,
         ),
     ),
-    "flux-dev-depth": ModelSpec(
+    "flux-depth-dev": ModelSpec(
         ckpt_path=DEV_DEPTH_CACHE,
         ckpt_url=DEV_DEPTH_URL,
         params=FluxParams(
@@ -169,7 +169,7 @@ configs = {
             shift_factor=0.1159,
         ),
     ),
-    "flux-dev-fill": ModelSpec(
+    "flux-fill-dev": ModelSpec(
         ckpt_path=DEV_INPAINTING_CACHE,
         ckpt_url=DEV_INPAINTING_URL,
         params=FluxParams(

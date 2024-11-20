@@ -1141,9 +1141,9 @@ class HotswapPredictor(BasePredictor):
         )
 
 
-class DevCannyPredictor(Predictor):
+class CannyDevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev-canny", disable_fp8=True)
+        self.base_setup("flux-canny-dev", disable_fp8=True)
 
     def predict(
         self,
@@ -1185,9 +1185,9 @@ class DevCannyPredictor(Predictor):
         )
 
 
-class DevDepthPredictor(Predictor):
+class DepthDevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev-depth", disable_fp8=True)
+        self.base_setup("flux-depth-dev", disable_fp8=True)
 
     def predict(
         self,
