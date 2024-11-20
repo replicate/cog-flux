@@ -22,6 +22,7 @@ build:
     - "loguru==0.7.2"
     - "pybase64==1.4.0"
     - "pydash==8.0.3"
+    - "opencv-python==4.10.0.84"
     # pinning to specific nightlies for release
     - "https://download.pytorch.org/whl/nightly/cu124/torch-2.6.0.dev20240918%2Bcu124-cp311-cp311-linux_x86_64.whl"
     - "https://download.pytorch.org/whl/nightly/cu124/torchaudio-2.5.0.dev20240918%2Bcu124-cp311-cp311-linux_x86_64.whl"

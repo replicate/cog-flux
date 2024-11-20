@@ -13,7 +13,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.benchmark_limit = 20
 import logging
 
-from attr import dataclass
+from dataclasses import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 from fp8.flux_pipeline import FluxPipeline
 from fp8.util import LoadedModels
@@ -26,6 +26,11 @@ from typing import List
 from torchvision import transforms
 from cog import BasePredictor, Input, Path
 from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
+from flux.modules.image_embedders import (
+    ImageEncoder,
+    DepthImageEncoder,
+    CannyImageEncoder,
+)
 
 from diffusers.pipelines.stable_diffusion.safety_checker import (
     StableDiffusionSafetyChecker,
@@ -70,32 +75,32 @@ ASPECT_RATIOS = {
 }
 
 
-@dataclass
-class SharedInputs:
-    prompt: Input = Input(description="Prompt for generated image")
-    aspect_ratio: Input = Input(
+@dataclass(frozen=True)
+class Inputs:
+    prompt = Input(description="Prompt for generated image")
+    aspect_ratio = Input(
         description="Aspect ratio for the generated image",
         choices=list(ASPECT_RATIOS.keys()),
         default="1:1",
     )
-    num_outputs: Input = Input(
+    num_outputs = Input(
         description="Number of outputs to generate", default=1, le=4, ge=1
     )
-    seed: Input = Input(
+    seed = Input(
         description="Random seed. Set for reproducible generation", default=None
     )
-    output_format: Input = Input(
+    output_format = Input(
         description="Format of the output images",
         choices=["webp", "jpg", "png"],
         default="webp",
     )
-    output_quality: Input = Input(
+    output_quality = Input(
         description="Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs",
         default=80,
         ge=0,
         le=100,
     )
-    disable_safety_checker: Input = Input(
+    disable_safety_checker = Input(
         description="Disable safety checker for generated images.",
         default=False,
     )
@@ -103,13 +108,13 @@ class SharedInputs:
         description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
         default=None,
     )
-    lora_scale: Input = Input(
+    lora_scale = Input(
         description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
         default=1.0,
         le=3.0,
         ge=-1.0,
     )
-    megapixels: Input = Input(
+    megapixels = Input(
         description="Approximate number of megapixels for generated image",
         choices=["1", "0.25"],
         default="1",
@@ -126,8 +131,28 @@ class SharedInputs:
             default=default,
         )
 
+    @staticmethod
+    def guidance_with(default: float, le: float) -> Input:
+        return Input(
+            description="Guidance for generated image", ge=0, le=le, default=default
+        )
 
-SHARED_INPUTS = SharedInputs()
+    @staticmethod
+    def num_inference_steps_with(
+        default: int, le: int, recommended: int | tuple[int, int]
+    ) -> Input:
+        description = "Number of denoising steps. "
+        if isinstance(recommended, tuple):
+            description += f"Recommended range is {recommended[0]}-{recommended[1]}, and lower number of steps produce lower quality outputs, faster."
+        else:
+            description += f"{recommended} is recommended, and lower number of steps produce lower quality outputs, faster."
+
+        return Input(
+            description=description,
+            ge=1,
+            le=le,
+            default=default,
+        )
 
 
 class Predictor(BasePredictor):
@@ -409,9 +434,8 @@ class Predictor(BasePredictor):
         width: int = 1024,
         height: int = 1024,
         mask: Path = None,  # inpainting for flux-defv
-    ) -> tuple[
-        List[Image.Image], List[np.ndarray]
-    ]:
+        control_image_embedder: ImageEncoder | None = None,
+    ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
         init_image = None
@@ -425,8 +449,16 @@ class Predictor(BasePredictor):
             assert image_path is not None
             img_cond, width, height = self.prepare_img_cond(image_path, mask_path)
 
+        elif control_image_embedder is not None:
+            img_cond = self.prepare_control(
+                image_path=image_path,
+                image_embedder=control_image_embedder,
+                width=width,
+                height=height,
+            )
+
         # img2img only works for flux-dev
-        elif image_path:
+        elif image_path is not None:
             init_image, width, height = self.prepare_init_image(image_path)
 
         # prepare input
@@ -617,6 +649,7 @@ class Predictor(BasePredictor):
         seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
+        control_image_embedder: ImageEncoder | None = None,
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         if go_fast and not self.disable_fp8:
             assert image is None
@@ -647,6 +680,7 @@ class Predictor(BasePredictor):
             width=width,
             height=height,
             mask=mask,
+            control_image_embedder=control_image_embedder,
         )
 
     def prepare_init_image(self, image_path: Path) -> tuple[torch.Tensor, int, int]:
@@ -662,6 +696,20 @@ class Predictor(BasePredictor):
             init_image = self.ae.encode(init_image)
 
         return init_image, width, height
+
+    def prepare_control(
+        self, image_path: Path, image_embedder: ImageEncoder, width: int, height: int
+    ) -> torch.Tensor:
+        image = load_image_tensor(image_path)
+        image = maybe_scale_to_size(image, width, height)
+
+        with torch.no_grad():
+            img_cond = image_embedder(image)
+            with self.maybe_offload_ae():
+                img_cond = self.ae.encode(img_cond)
+
+        img_cond = img_cond.to(torch.bfloat16)
+        return rearrange(img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
 
     def prepare_img_cond(
         self, image_path: Path, mask_path: Path
@@ -717,21 +765,18 @@ class SchnellPredictor(Predictor):
 
     def predict(
         self,
-        prompt: str = SHARED_INPUTS.prompt,
-        aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
-        num_outputs: int = SHARED_INPUTS.num_outputs,
-        num_inference_steps: int = Input(
-            description="Number of denoising steps. 4 is recommended, and lower number of steps produce lower quality outputs, faster.",
-            ge=1,
-            le=4,
-            default=4,
+        prompt: str = Inputs.prompt,
+        aspect_ratio: str = Inputs.aspect_ratio,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=4, default=4, recommended=4
         ),
-        seed: int = SHARED_INPUTS.seed,
-        output_format: str = SHARED_INPUTS.output_format,
-        output_quality: int = SHARED_INPUTS.output_quality,
-        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        go_fast: bool = SHARED_INPUTS.go_fast,
-        megapixels: str = SHARED_INPUTS.megapixels,
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        go_fast: bool = Inputs.go_fast,
+        megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         width, height = self.preprocess(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
@@ -759,8 +804,8 @@ class DevPredictor(Predictor):
 
     def predict(
         self,
-        prompt: str = SHARED_INPUTS.prompt,
-        aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        prompt: str = Inputs.prompt,
+        aspect_ratio: str = Inputs.aspect_ratio,
         image: Path = Input(
             description="Input image for image to image mode. The aspect ratio of your output will match this image",
             default=None,
@@ -771,22 +816,17 @@ class DevPredictor(Predictor):
             le=1.0,
             default=0.80,
         ),
-        num_outputs: int = SHARED_INPUTS.num_outputs,
-        num_inference_steps: int = Input(
-            description="Number of denoising steps. Recommended range is 28-50",
-            ge=1,
-            le=50,
-            default=28,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=28, recommended=(28, 50)
         ),
-        guidance: float = Input(
-            description="Guidance for generated image", ge=0, le=10, default=3
-        ),
-        seed: int = SHARED_INPUTS.seed,
-        output_format: str = SHARED_INPUTS.output_format,
-        output_quality: int = SHARED_INPUTS.output_quality,
-        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        go_fast: bool = SHARED_INPUTS.go_fast,
-        megapixels: str = SHARED_INPUTS.megapixels,
+        guidance: float = Inputs.guidance_with(default=3, le=10),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        go_fast: bool = Inputs.go_fast,
+        megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
@@ -821,23 +861,20 @@ class SchnellLoraPredictor(Predictor):
 
     def predict(
         self,
-        prompt: str = SHARED_INPUTS.prompt,
-        aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
-        num_outputs: int = SHARED_INPUTS.num_outputs,
-        num_inference_steps: int = Input(
-            description="Number of denoising steps. 4 is recommended, and lower number of steps produce lower quality outputs, faster.",
-            ge=1,
-            le=4,
-            default=4,
+        prompt: str = Inputs.prompt,
+        aspect_ratio: str = Inputs.aspect_ratio,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=4, default=4, recommended=4
         ),
-        seed: int = SHARED_INPUTS.seed,
-        output_format: str = SHARED_INPUTS.output_format,
-        output_quality: int = SHARED_INPUTS.output_quality,
-        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        go_fast: bool = SHARED_INPUTS.go_fast,
-        lora_weights: str = SHARED_INPUTS.lora_weights,
-        lora_scale: float = SHARED_INPUTS.lora_scale,
-        megapixels: str = SHARED_INPUTS.megapixels,
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        go_fast: bool = Inputs.go_fast,
+        lora_weights: str = Inputs.lora_weights,
+        lora_scale: float = Inputs.lora_scale,
+        megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
@@ -868,8 +905,8 @@ class DevLoraPredictor(Predictor):
 
     def predict(
         self,
-        prompt: str = SHARED_INPUTS.prompt,
-        aspect_ratio: str = SHARED_INPUTS.aspect_ratio,
+        prompt: str = Inputs.prompt,
+        aspect_ratio: str = Inputs.aspect_ratio,
         image: Path = Input(
             description="Input image for image to image mode. The aspect ratio of your output will match this image",
             default=None,
@@ -880,24 +917,19 @@ class DevLoraPredictor(Predictor):
             le=1.0,
             default=0.80,
         ),
-        num_outputs: int = SHARED_INPUTS.num_outputs,
-        num_inference_steps: int = Input(
-            description="Number of denoising steps. Recommended range is 28-50",
-            ge=1,
-            le=50,
-            default=28,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=28, recommended=(28, 50)
         ),
-        guidance: float = Input(
-            description="Guidance for generated image", ge=0, le=10, default=3
-        ),
-        seed: int = SHARED_INPUTS.seed,
-        output_format: str = SHARED_INPUTS.output_format,
-        output_quality: int = SHARED_INPUTS.output_quality,
-        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        go_fast: bool = SHARED_INPUTS.go_fast,
-        lora_weights: str = SHARED_INPUTS.lora_weights,
-        lora_scale: float = SHARED_INPUTS.lora_scale,
-        megapixels: str = SHARED_INPUTS.megapixels,
+        guidance: float = Inputs.guidance_with(default=3, le=10),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        go_fast: bool = Inputs.go_fast,
+        lora_weights: str = Inputs.lora_weights,
+        lora_scale: float = Inputs.lora_scale,
+        megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
@@ -1101,6 +1133,94 @@ class HotswapPredictor(BasePredictor):
         )
 
         return model.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+class DevCannyPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup("flux-dev-canny", disable_fp8=True)
+
+    def predict(
+        self,
+        prompt: str = Inputs.prompt,
+        control_image: Path = Input(
+            description="Image used to control the generation. The canny edge detection will be automatically generated."
+        ),
+        aspect_ratio: str = Inputs.aspect_ratio,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=50, recommended=(28, 50)
+        ),
+        guidance: float = Inputs.guidance_with(default=30, le=100),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        megapixels: str = Inputs.megapixels,
+    ) -> List[Path]:
+        width, height = self.preprocess(aspect_ratio, megapixels)
+        imgs, np_imgs = self.shared_predict(
+            go_fast=False,
+            prompt=prompt,
+            num_outputs=num_outputs,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
+            seed=seed,
+            width=width,
+            height=height,
+            image=control_image,
+            control_image_embedder=CannyImageEncoder(torch.device("cuda")),
+        )
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+class DevDepthPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup("flux-dev-depth", disable_fp8=True)
+
+    def predict(
+        self,
+        prompt: str = Inputs.prompt,
+        control_image: Path = Input(
+            description="Image used to control the generation. The depth map will be automatically generated."
+        ),
+        aspect_ratio: str = Inputs.aspect_ratio,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=50, recommended=(28, 50)
+        ),
+        guidance: float = Inputs.guidance_with(default=10, le=100),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        megapixels: str = Inputs.megapixels,
+    ) -> List[Path]:
+        width, height = self.preprocess(aspect_ratio, megapixels)
+        imgs, np_imgs = self.shared_predict(
+            go_fast=False,
+            prompt=prompt,
+            num_outputs=num_outputs,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
+            seed=seed,
+            width=width,
+            height=height,
+            image=control_image,
+            control_image_embedder=DepthImageEncoder(torch.device("cuda")),
+        )
+        return self.postprocess(
             imgs,
             disable_safety_checker,
             output_format,
