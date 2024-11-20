@@ -33,11 +33,11 @@ SCHNELL_URL = "https://weights.replicate.delivery/default/official-models/flux/s
 DEV_CACHE = "./model-cache/dev/dev.sft"
 DEV_URL = "https://weights.replicate.delivery/default/official-models/flux/dev/dev.sft"
 DEV_CANNY_CACHE = "./model-cache/dev-canny/dev-canny.safetensors"
-DEV_CANNY_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-dev-canny.safetensors"
+DEV_CANNY_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-canny-dev.safetensors"
 DEV_DEPTH_CACHE = "./model-cache/dev-depth/dev-depth.safetensors"
-DEV_DEPTH_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-dev-depth.safetensors"
+DEV_DEPTH_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-depth-dev.safetensors"
 DEV_INPAINTING_CACHE = "./model-cache/dev-inpainting/dev-inpainting.safetensors"
-DEV_INPAINTING_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-dev-fill.safetensors"
+DEV_INPAINTING_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-fill-dev.safetensors"
 AE_CACHE = "./model-cache/ae/ae.sft"
 AE_URL = "https://weights.replicate.delivery/default/official-models/flux/ae/ae.sft"
 SIGLIP_URL = "https://weights.replicate.delivery/default/google/siglip-so400m-patch14-384/model-bf16.tar"
@@ -285,7 +285,7 @@ def load_redux(device: str | torch.device = "cuda") -> RemixImageEncoder:
         download_weights(SIGLIP_URL, SIGLIP_CACHE)
     if not os.path.exists(REMIX_CACHE):
         download_weights(REMIX_URL, REMIX_CACHE)
-    
+
     return RemixImageEncoder(device, remix_path = REMIX_CACHE, siglip_path=SIGLIP_CACHE, dtype=torch.bfloat16)
 
 def download_ckpt_from_hf(
