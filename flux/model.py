@@ -16,6 +16,7 @@ from flux.modules.layers import (
 @dataclass
 class FluxParams:
     in_channels: int
+    out_channels: int
     vec_in_dim: int
     context_in_dim: int
     hidden_size: int
@@ -39,7 +40,7 @@ class Flux(nn.Module):
 
         self.params = params
         self.in_channels = params.in_channels
-        self.out_channels = self.in_channels
+        self.out_channels = params.out_channels
         if params.hidden_size % params.num_heads != 0:
             raise ValueError(
                 f"Hidden size {params.hidden_size} must be divisible by num_heads {params.num_heads}"

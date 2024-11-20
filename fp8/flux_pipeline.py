@@ -386,12 +386,12 @@ class FluxPipeline:
         return im
 
     @torch.inference_mode()
-    def as_img_tensor(self, x: torch.Tensor) -> io.BytesIO:
-        """Converts the image tensor to bytes."""
+    def as_img_tensor(self, x: torch.Tensor) -> tuple[List[Image.Image], List[np.ndarray]]:
+        """Converts the image tensor to PIL images and np.ndarrays."""
         # bring into PIL format and save
         num_images = x.shape[0]
-        np_images: List[np.array] = []
-        pil_images: List[Image] = []
+        np_images = []
+        pil_images = []
         for i in range(num_images):
             im = (
                 rearrange(x[i], "c h w -> h w c")

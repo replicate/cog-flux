@@ -31,6 +31,12 @@ SCHNELL_CACHE = "./model-cache/schnell/schnell.sft"
 SCHNELL_URL = "https://weights.replicate.delivery/default/official-models/flux/schnell/schnell.sft"
 DEV_CACHE = "./model-cache/dev/dev.sft"
 DEV_URL = "https://weights.replicate.delivery/default/official-models/flux/dev/dev.sft"
+DEV_CANNY_CACHE = "./model-cache/dev-canny/dev-canny.safetensors"
+DEV_CANNY_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-and-fill/flux1-dev-canny.safetensors"
+DEV_DEPTH_CACHE = "./model-cache/dev-depth/dev-depth.safetensors"
+DEV_DEPTH_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-and-fill/flux1-dev-depth.safetensors"
+DEV_INPAINTING_CACHE = "./model-cache/dev-inpainting/dev-inpainting.safetensors"
+DEV_INPAINTING_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-and-fill/flux1-dev-inpainting.safetensors"
 AE_CACHE = "./model-cache/ae/ae.sft"
 AE_URL = "https://weights.replicate.delivery/default/official-models/flux/ae/ae.sft"
 
@@ -40,6 +46,7 @@ configs = {
         ckpt_url=DEV_URL,
         params=FluxParams(
             in_channels=64,
+            out_channels=64,
             vec_in_dim=768,
             context_in_dim=4096,
             hidden_size=3072,
@@ -71,6 +78,7 @@ configs = {
         ckpt_url=SCHNELL_URL,
         params=FluxParams(
             in_channels=64,
+            out_channels=64,
             vec_in_dim=768,
             context_in_dim=4096,
             hidden_size=3072,
@@ -82,6 +90,102 @@ configs = {
             theta=10_000,
             qkv_bias=True,
             guidance_embed=False,
+        ),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
+    "flux-dev-canny": ModelSpec(
+        ckpt_path=DEV_CANNY_CACHE,
+        ckpt_url=DEV_CANNY_URL,
+        params=FluxParams(
+            in_channels=128,
+            out_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=True,
+        ),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
+    "flux-dev-depth": ModelSpec(
+        ckpt_path=DEV_DEPTH_CACHE,
+        ckpt_url=DEV_DEPTH_URL,
+        params=FluxParams(
+            in_channels=128,
+            out_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=True,
+        ),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
+    "flux-dev-fill": ModelSpec(
+        ckpt_path=DEV_INPAINTING_CACHE,
+        ckpt_url=DEV_INPAINTING_URL,
+        params=FluxParams(
+            in_channels=384,
+            out_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=True,
         ),
         ae_path=AE_CACHE,
         ae_url=AE_URL,
@@ -188,7 +292,7 @@ def download_weights(url: str, dest: Path):
     print("downloading url: ", url)
     print("downloading to: ", dest)
     if url.endswith("tar"):
-        subprocess.check_call(["pget", "-x", url, dest], close_fds=False)
+        subprocess.check_call(["pget", "--log-level=WARNING", "-x", url, dest], close_fds=False)
     else:
-        subprocess.check_call(["pget", url, dest], close_fds=False)
+        subprocess.check_call(["pget", "--log-level=WARNING", url, dest], close_fds=False)
     print("downloading took: ", time.time() - start)

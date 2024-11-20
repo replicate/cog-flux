@@ -1,8 +1,10 @@
+from contextlib import contextmanager
 import os
 import time
-from typing import Any, Tuple, Optional
+from typing import Any, Tuple
 
 import torch
+from torch import Tensor
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -45,6 +47,9 @@ FALCON_MODEL_CACHE = Path("./falcon-cache")
 FALCON_MODEL_URL = (
     "https://weights.replicate.delivery/default/falconai/nsfw-image-detection.tar"
 )
+
+FLUX_DEV = "flux-dev"
+FLUX_SCHNELL = "flux-schnell"
 
 # Suppress diffusers nsfw warnings
 logging.getLogger("diffusers").setLevel(logging.CRITICAL)
@@ -182,7 +187,7 @@ class Predictor(BasePredictor):
             compile_fp8 = False
 
         device = "cuda"
-        max_length = 256 if self.flow_model_name == "flux-schnell" else 512
+        max_length = 256 if self.flow_model_name == FLUX_SCHNELL else 512
         if t5:
             self.t5 = t5
         else:
@@ -202,8 +207,8 @@ class Predictor(BasePredictor):
                 self.flow_model_name, device="cpu" if self.offload else device
             )
 
-        self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
-        self.shift = self.flow_model_name != "flux-schnell"
+        self.num_steps = 4 if self.flow_model_name == FLUX_SCHNELL else 28
+        self.shift = self.flow_model_name != FLUX_SCHNELL
         self.compile_run = False
 
         shared_models = LoadedModels(
@@ -274,12 +279,14 @@ class Predictor(BasePredictor):
 
         print("compiled in ", time.time() - st)
 
+    # TODO(andreas): This is never used and will throw an error if
+    # used because aspect_ratio is not a valid argument to bf16_predict
     def compile_bf16(self):
         print("compiling bf16 model")
         st = time.time()
 
         self.compile_run = True
-        self.base_predict(
+        self.bf16_predict(
             prompt="a cool dog",
             aspect_ratio="1:1",
             num_outputs=1,
@@ -289,8 +296,8 @@ class Predictor(BasePredictor):
         )
         print("compiled in ", time.time() - st)
 
-    def aspect_ratio_to_width_height(self, aspect_ratio: str):
-        return ASPECT_RATIOS.get(aspect_ratio)
+    def aspect_ratio_to_width_height(self, aspect_ratio: str) -> tuple[int, int]:
+        return ASPECT_RATIOS[aspect_ratio]
 
     def get_image(self, image: str):
         if image is None:
@@ -319,7 +326,8 @@ class Predictor(BasePredictor):
         img[img > 0.5] = 1
         return img[None, ...]
 
-    def predict():
+    # TODO(andreas): make this an abstract class
+    def predict(self):
         raise Exception("You need to instantiate a predictor for a specific flux model")
 
     @torch.inference_mode()
@@ -379,63 +387,47 @@ class Predictor(BasePredictor):
             self.bf16_lora_scale = lora_scale
 
     def preprocess(self, aspect_ratio: str, megapixels: str = "1") -> Tuple[int, int]:
-        width, height = ASPECT_RATIOS.get(aspect_ratio)
+        width, height = ASPECT_RATIOS[aspect_ratio]
         if megapixels == "0.25":
             width, height = width // 2, height // 2
 
         return (width, height)
 
+    # TODO(andreas): This is getting messy, with bf16_predict, shared_predict,
+    # and lots of model-specific switching. Refactor.
     @torch.inference_mode()
-    def base_predict(
+    def bf16_predict(
         self,
         prompt: str,
         num_outputs: int,
         num_inference_steps: int,
         guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
-        image: Path = None,  # img2img for flux-dev
+        image_path: Path | None = None,  # img2img for flux-dev
+        mask_path: Path | None = None,  # mask for flux-dev-fill
         prompt_strength: float = 0.8,
-        seed: int = None,
+        seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
         mask: Path = None,  # inpainting for flux-defv
-    ) -> List[Path]:
+    ) -> tuple[
+        List[Image.Image], List[np.ndarray]
+    ]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
         init_image = None
+        img_cond = None
 
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
 
+        if mask_path:
+            assert image_path is not None
+            img_cond, width, height = self.prepare_img_cond(image_path, mask_path)
+
         # img2img only works for flux-dev
-        if image:
-            print("Image detected - settting to img2img mode")
-            init_image = self.get_image(image)
-            width = init_image.shape[-1]
-            height = init_image.shape[-2]
-            print(f"Input image size: {width}x{height}")
-
-            # Calculate the scaling factor if the image exceeds MAX_IMAGE_SIZE
-            scale = min(MAX_IMAGE_SIZE / width, MAX_IMAGE_SIZE / height, 1)
-            if scale < 1:
-                width = int(width * scale)
-                height = int(height * scale)
-                print(f"Scaling image down to {width}x{height}")
-
-            # Round image width and height to nearest multiple of 16
-            width = round(width / 16) * 16
-            height = round(height / 16) * 16
-            print(f"Input image size set to: {width}x{height}")
-
-            # Resize
-            init_image = init_image.to(torch_device)
-            init_image = torch.nn.functional.interpolate(init_image, (height, width))
-            if self.offload:
-                self.ae.encoder.to(torch_device)
-            init_image = self.ae.encode(init_image)
-            if self.offload:
-                self.ae = self.ae.cpu()
-                torch.cuda.empty_cache()
+        elif image_path:
+            init_image, width, height = self.prepare_init_image(image_path)
 
         # prepare input
         x = get_noise(
@@ -448,7 +440,11 @@ class Predictor(BasePredictor):
         )
         noise = x
         timesteps = get_schedule(
-            num_inference_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift
+            num_inference_steps,
+            # TODO: this has changed in upstream flux to x.shape[1]
+            # (x.shape[-1] * x.shape[-2]) // 4,
+            x.shape[1],
+            shift=self.shift,
         )
 
         if init_image is not None:
@@ -460,6 +456,8 @@ class Predictor(BasePredictor):
         if self.offload:
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
+        if img_cond is not None:
+            inp["img_cond"] = img_cond
 
         if mask:
             mask = self.get_mask(mask)
@@ -523,12 +521,12 @@ class Predictor(BasePredictor):
         num_outputs: int,
         num_inference_steps: int,
         guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
-        image: Path = None,  # img2img for flux-dev
+        image: Path | None = None,  # img2img for flux-dev
         prompt_strength: float = 0.8,
-        seed: int = None,
+        seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
-    ) -> List[Image]:
+    ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """Run a single prediction on the model"""
         print("running quantized prediction")
 
@@ -546,16 +544,13 @@ class Predictor(BasePredictor):
 
     def postprocess(
         self,
-        images: List[Image],
+        images: List[Image.Image],
         disable_safety_checker: bool,
         output_format: str,
         output_quality: int,
-        np_images: Optional[List[Image]] = None,
+        np_images: List[np.ndarray],
     ) -> List[Path]:
         has_nsfw_content = [False] * len(images)
-
-        if not np_images:
-            np_images = [np.array(val) for val in images]
 
         if not disable_safety_checker:
             _, has_nsfw_content = self.run_safety_checker(images, np_images)
@@ -616,14 +611,17 @@ class Predictor(BasePredictor):
         num_outputs: int,
         num_inference_steps: int,
         guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
-        image: Path = None,  # img2img for flux-dev
+        image: Path | None = None,  # img2img for flux-dev
+        mask: Path | None = None,  # for flux-dev-fill
         prompt_strength: float = 0.8,
-        seed: int = None,
+        seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
-        mask: Path = None,  # inpainting
-    ):
+    ) -> tuple[List[Image.Image], List[np.ndarray]]:
         if go_fast and not self.disable_fp8:
+            assert image is None
+            assert mask is None
+
             return self.fp8_predict(
                 prompt=prompt,
                 num_outputs=num_outputs,
@@ -637,12 +635,13 @@ class Predictor(BasePredictor):
             )
         if self.disable_fp8:
             print("running bf16 model, fp8 disabled")
-        return self.base_predict(
+        return self.bf16_predict(
             prompt=prompt,
             num_outputs=num_outputs,
             num_inference_steps=num_inference_steps,
             guidance=guidance,
-            image=image,
+            image_path=image,
+            mask_path=mask,
             prompt_strength=prompt_strength,
             seed=seed,
             width=width,
@@ -650,10 +649,71 @@ class Predictor(BasePredictor):
             mask=mask,
         )
 
+    def prepare_init_image(self, image_path: Path) -> tuple[torch.Tensor, int, int]:
+        torch_device = torch.device("cuda")
+
+        print("Image detected - setting to img2img mode")
+        init_image = load_image_tensor(image_path).to(torch_device)
+        init_image, width, height = maybe_scale_to_closest_multiple(
+            init_image, multiple=16
+        )  # is 16 correct?
+
+        with self.maybe_offload_ae():
+            init_image = self.ae.encode(init_image)
+
+        return init_image, width, height
+
+    def prepare_img_cond(
+        self, image_path: Path, mask_path: Path
+    ) -> tuple[torch.Tensor, int, int]:
+        torch_device = torch.device("cuda")
+
+        image = load_image_tensor(image_path).to(torch_device)
+        mask = load_grayscale_image_tensor(mask_path).to(torch_device)
+        image, width, height = maybe_scale_to_closest_multiple(image, multiple=32)
+        mask = maybe_scale_to_size(mask, width, height)
+
+        # TODO(andreas): support image inputs with alpha channels
+        with torch.no_grad():
+            img_cond = image
+            img_cond = img_cond * (1 - mask)
+
+            with self.maybe_offload_ae():
+                img_cond = self.ae.encode(img_cond)
+
+            mask = mask[:, 0, :, :]
+            mask = mask.to(torch.bfloat16)
+            mask = rearrange(
+                mask,
+                "b (h ph) (w pw) -> b (ph pw) h w",
+                ph=8,
+                pw=8,
+            )
+            mask = rearrange(mask, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
+
+        img_cond = img_cond.to(torch.bfloat16)
+        img_cond = rearrange(
+            img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2
+        )
+        img_cond = torch.cat((img_cond, mask), dim=-1)
+
+        return img_cond, width, height
+
+    @contextmanager
+    def maybe_offload_ae(self):
+        if self.offload:
+            self.ae.encoder.to(torch.device("cuda"))
+        try:
+            yield
+        finally:
+            if self.offload:
+                self.ae = self.ae.cpu()
+                torch.cuda.empty_cache()
+
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell", compile_fp8=True)
+        self.base_setup(FLUX_SCHNELL, compile_fp8=True)
 
     def predict(
         self,
@@ -695,7 +755,7 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev", compile_fp8=True)
+        self.base_setup(FLUX_DEV, compile_fp8=True)
 
     def predict(
         self,
@@ -756,7 +816,7 @@ class DevPredictor(Predictor):
 
 class SchnellLoraPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell", compile_fp8=True)
+        self.base_setup(FLUX_SCHNELL, compile_fp8=True)
         self.lora_setup()
 
     def predict(
@@ -803,7 +863,7 @@ class SchnellLoraPredictor(Predictor):
 
 class DevLoraPredictor(Predictor):
     def setup(self, t5=None, clip=None, ae=None) -> None:
-        self.base_setup("flux-dev", compile_fp8=True, t5=t5, clip=clip, ae=ae)
+        self.base_setup(FLUX_DEV, compile_fp8=True, t5=t5, clip=clip, ae=ae)
         self.lora_setup()
 
     def predict(
@@ -859,6 +919,57 @@ class DevLoraPredictor(Predictor):
             height=height,
         )
 
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+class FillDevPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup("flux-fill-dev", disable_fp8=True)
+
+    def predict(
+        self,
+        prompt: str = Inputs.prompt,
+        image: Path = Input(
+            description=f"The image to inpaint. Can contain alpha mask. If the image width or height are not multiples of 32, they will be scaled to the closest multiple of 32. If the image dimensions don't fit within {MAX_IMAGE_SIZE}x{MAX_IMAGE_SIZE}, it will be scaled down to fit."
+        ),
+        mask: Path = Input(
+            description="A black-and-white image that describes the part of the image to inpaint. Black areas will be preserved while white areas will be inpainted.",
+            default=None,
+        ),
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=28, recommended=(28, 50)
+        ),
+        guidance: float = Inputs.guidance_with(default=30, le=100),
+        seed: int = Inputs.seed,
+        megapixels: str = Inputs.megapixels_with_match_input,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        # go_fast: bool = Inputs.go_fast,
+    ) -> List[Path]:
+        # TODO(andreas): This means we're reading the image twice
+        # which is a bit inefficient.
+        width, height = self.size_maybe_match_input(image, megapixels)
+
+        imgs, np_imgs = self.shared_predict(
+            go_fast=False,
+            prompt=prompt,
+            num_outputs=num_outputs,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
+            image=image,
+            mask=mask,
+            seed=seed,
+            width=width,
+            height=height,
+        )
         return self.postprocess(
             imgs,
             disable_safety_checker,
@@ -1004,3 +1115,61 @@ class TestPredictor(Predictor):
 
     def predict(self, how_many: int = Input(description="how many", ge=0)) -> Any:
         return self.num + how_many
+
+
+def load_image_tensor(image_path: Path) -> Tensor:
+    image = Image.open(image_path).convert("RGB")
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: 2.0 * x - 1.0),
+        ]
+    )
+    img: Tensor = transform(image)
+    return img[None, ...]
+
+
+def load_grayscale_image_tensor(image_path: Path) -> Tensor:
+    image = Image.open(image_path).convert("L")
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+        ]
+    )
+    img: Tensor = transform(image)
+    return img[None, ...]
+
+
+def maybe_scale_to_closest_multiple(
+    image: Tensor, multiple: int
+) -> tuple[Tensor, int, int]:
+    width = image.shape[-1]
+    height = image.shape[-2]
+    print(f"Input image size: {width}x{height}")
+
+    # Calculate the scaling factor if the image exceeds MAX_IMAGE_SIZE
+    scale = min(MAX_IMAGE_SIZE / width, MAX_IMAGE_SIZE / height, 1)
+    if scale < 1:
+        width = int(width * scale)
+        height = int(height * scale)
+        print(f"Scaling image down to {width}x{height}")
+
+    # Round image width and height to nearest multiple of 16
+    width = round(width / multiple) * multiple
+    height = round(height / multiple) * multiple
+    print(f"Input image size set to: {width}x{height}")
+
+    # Resize
+    image = torch.nn.functional.interpolate(image, (height, width))
+
+    return image, width, height
+
+
+def maybe_scale_to_size(image: Tensor, width: int, height: int) -> Tensor:
+    image_width = image.shape[-1]
+    image_height = image.shape[-2]
+
+    if image_width == width and image_height == height:
+        return image
+
+    return torch.nn.functional.interpolate(image, (height, width))
