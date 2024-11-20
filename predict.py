@@ -13,8 +13,16 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.benchmark_limit = 20
 import logging
 
+
 from dataclasses import dataclass
-from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
+from flux.sampling import (
+    denoise,
+    get_noise,
+    get_schedule,
+    prepare,
+    prepare_remix,
+    unpack,
+)
 from fp8.flux_pipeline import FluxPipeline
 from fp8.util import LoadedModels
 from fp8.lora_loading import load_lora, load_loras, unload_loras
@@ -25,7 +33,14 @@ from PIL import Image
 from typing import List
 from torchvision import transforms
 from cog import BasePredictor, Input, Path
-from flux.util import load_ae, load_clip, load_flow_model, load_t5, download_weights
+from flux.util import (
+    load_ae,
+    load_clip,
+    load_flow_model,
+    load_redux,
+    load_t5,
+    download_weights,
+)
 from flux.modules.image_embedders import (
     ImageEncoder,
     DepthImageEncoder,
@@ -355,6 +370,9 @@ class Predictor(BasePredictor):
     def predict(self):
         raise Exception("You need to instantiate a predictor for a specific flux model")
 
+    def prepare(self, x, prompt):
+        return prepare(t5=self.t5, clip=self.clip, img=x, prompt=prompt)
+
     @torch.inference_mode()
     def handle_loras(
         self,
@@ -487,7 +505,9 @@ class Predictor(BasePredictor):
 
         if self.offload:
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
-        inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
+
+        inp = self.prepare(x, [prompt] * num_outputs)
+
         if img_cond is not None:
             inp["img_cond"] = img_cond
 
@@ -946,6 +966,130 @@ class DevLoraPredictor(Predictor):
             guidance=guidance,
             image=image,
             prompt_strength=prompt_strength,
+            seed=seed,
+            width=width,
+            height=height,
+        )
+
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+class _ReduxPredictor(Predictor):
+    def redux_setup(self):
+        self.redux_image_encoder = load_redux(device="cuda")
+        self.cur_prediction_redux_img = None
+        # TODO: hopefully temporary
+        self.disable_fp8 = True
+
+    def prepare(self, x, prompt):
+        return prepare_remix(
+            self.t5,
+            self.clip,
+            x,
+            prompt=prompt,
+            encoder=self.redux_image_encoder,
+            img_cond_path=self.cur_prediction_redux_img,
+        )
+
+
+class SchnellReduxPredictor(_ReduxPredictor):
+    def setup(self):
+        self.base_setup("flux-schnell", compile_fp8=False)
+        self.redux_setup()
+
+    def predict(
+        self,
+        redux_image: Path = Input(
+            description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models",
+            default=None,
+        ),
+        aspect_ratio: str = Inputs.aspect_ratio,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Input(
+            description="Number of denoising steps. 4 is recommended, and lower number of steps produce lower quality outputs, faster.",
+            ge=1,
+            le=4,
+            default=4,
+        ),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        megapixels: str = Inputs.megapixels,
+    ) -> List[Path]:
+        go_fast = False
+        prompt = ""
+
+        # TODO: don't love passing this via a class variable, but it's better than totally breaking our abstractions.
+        self.cur_prediction_redux_img = redux_image
+
+        width, height = self.preprocess(aspect_ratio, megapixels)
+        imgs, np_imgs = self.shared_predict(
+            go_fast,
+            prompt,
+            num_outputs,
+            num_inference_steps=num_inference_steps,
+            seed=seed,
+            width=width,
+            height=height,
+        )
+
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+class DevReduxPredictor(_ReduxPredictor):
+    def setup(self):
+        self.base_setup("flux-dev", compile_fp8=False)
+        self.redux_setup()
+
+    def predict(
+        self,
+        redux_image: Path = Input(
+            description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models",
+            default=None,
+        ),
+        aspect_ratio: str = Inputs.aspect_ratio,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Input(
+            description="Number of denoising steps. Recommended range is 28-50",
+            ge=1,
+            le=50,
+            default=28,
+        ),
+        guidance: float = Input(
+            description="Guidance for generated image", ge=0, le=10, default=3
+        ),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        megapixels: str = Inputs.megapixels,
+    ) -> List[Path]:
+        go_fast = False
+        prompt = ""
+
+        # TODO: don't love passing this via a class variable, but it's better than totally breaking our abstractions.
+        self.cur_prediction_redux_img = redux_image
+
+        width, height = self.preprocess(aspect_ratio, megapixels)
+        imgs, np_imgs = self.shared_predict(
+            go_fast,
+            prompt,
+            num_outputs,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
             seed=seed,
             width=width,
             height=height,

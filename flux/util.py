@@ -9,6 +9,7 @@ from safetensors.torch import load_file as load_sft
 from flux.model import Flux, FluxParams
 from flux.modules.autoencoder import AutoEncoder, AutoEncoderParams
 from flux.modules.conditioner import HFEmbedder
+from flux.modules.image_embedders import RemixImageEncoder
 from flux.modules.quantize import replace_linear_weight_only_int8_per_channel
 from huggingface_hub import hf_hub_download
 from pathlib import Path
@@ -39,6 +40,10 @@ DEV_INPAINTING_CACHE = "./model-cache/dev-inpainting/dev-inpainting.safetensors"
 DEV_INPAINTING_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-dev-fill.safetensors"
 AE_CACHE = "./model-cache/ae/ae.sft"
 AE_URL = "https://weights.replicate.delivery/default/official-models/flux/ae/ae.sft"
+SIGLIP_URL = "https://weights.replicate.delivery/default/google/siglip-so400m-patch14-384/model-bf16.tar"
+SIGLIP_CACHE = "./model-cache/siglip"
+REMIX_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-and-fill/flux1-remix.safetensors"
+REMIX_CACHE = "./model-cache/remix/flux1-remix.safetensors"
 
 configs = {
     "flux-dev": ModelSpec(
@@ -275,6 +280,13 @@ def load_ae(name: str, device: str | torch.device = "cuda") -> AutoEncoder:
         print_load_warning(missing, unexpected)
     return ae
 
+def load_redux(device: str | torch.device = "cuda") -> RemixImageEncoder:
+    if not os.path.exists(SIGLIP_CACHE):
+        download_weights(SIGLIP_URL, SIGLIP_CACHE)
+    if not os.path.exists(REMIX_CACHE):
+        download_weights(REMIX_URL, REMIX_CACHE)
+    
+    return RemixImageEncoder(device, remix_path = REMIX_CACHE, siglip_path=SIGLIP_CACHE, dtype=torch.bfloat16)
 
 def download_ckpt_from_hf(
     repo_id: str,

@@ -10,7 +10,16 @@ from safetensors.torch import load_file as load_sft
 from torch import nn
 from transformers import AutoModelForDepthEstimation, AutoProcessor, SiglipImageProcessor, SiglipVisionModel
 
-from flux.util import print_load_warning
+# hack to avoid circular imports
+def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
+    if len(missing) > 0 and len(unexpected) > 0:
+        print(f"Got {len(missing)} missing keys:\n\t" + "\n\t".join(missing))
+        print("\n" + "-" * 79 + "\n")
+        print(f"Got {len(unexpected)} unexpected keys:\n\t" + "\n\t".join(unexpected))
+    elif len(missing) > 0:
+        print(f"Got {len(missing)} missing keys:\n\t" + "\n\t".join(missing))
+    elif len(unexpected) > 0:
+        print(f"Got {len(unexpected)} unexpected keys:\n\t" + "\n\t".join(unexpected))
 
 
 class ImageEncoder(Protocol):
@@ -39,7 +48,7 @@ class DepthImageEncoder(ImageEncoder):
         depth = depth / 127.5 - 1.0
         return depth
 
-
+      
 class CannyImageEncoder(ImageEncoder):
     def __init__(
         self,
@@ -77,6 +86,7 @@ class RemixImageEncoder(nn.Module):
         remix_dim: int = 1152,
         txt_in_features: int = 4096,
         remix_path: str | None = os.getenv("FLUX_REMIX"),
+        siglip_path: str | None = siglip_model_name,
         dtype=torch.bfloat16,
     ) -> None:
         assert remix_path is not None, "Remix path must be provided"
@@ -95,8 +105,9 @@ class RemixImageEncoder(nn.Module):
             missing, unexpected = self.load_state_dict(sd, strict=False, assign=True)
             print_load_warning(missing, unexpected)
 
-            self.siglip = SiglipVisionModel.from_pretrained(self.siglip_model_name).to(dtype=dtype)
-        self.normalize = SiglipImageProcessor.from_pretrained(self.siglip_model_name)
+            self.siglip = SiglipVisionModel.from_pretrained(siglip_path).to(dtype=dtype)
+        self.normalize = SiglipImageProcessor.from_pretrained(siglip_path)
+
 
     def __call__(self, x: Image.Image) -> torch.Tensor:
         imgs = self.normalize.preprocess(images=[x], do_resize=True, return_tensors="pt", do_convert_rgb=True)
