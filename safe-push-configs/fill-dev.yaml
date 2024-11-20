@@ -12,4 +12,4 @@ predict:
         mask: https://replicate.delivery/mgxm/188d0097-6a6f-4488-a058-b0b7a66e5677/desktop-mask.png
         prompt: A herd of sheep grazing on a hill
         seed: 2
-      match_prompt: A jpg image of sheep grazing on a hill
+      match_prompt: An image of sheep grazing on a hill

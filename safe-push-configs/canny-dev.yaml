@@ -11,4 +11,4 @@ predict:
         prompt: A bright red bird
         control_image: https://replicate.delivery/pbxt/IMPLYODUwdmHTsnLKi5YiFccIAK6g9l5KK1FNyCtpGS1g0UN/1200.jpeg
         seed: 2
-      match_prompt: A jpg image of red bird
+      match_prompt: An image of red bird
