@@ -287,13 +287,13 @@ def load_redux(device: str | torch.device = "cuda") -> ReduxImageEncoder:
         download_weights(SIGLIP_URL, SIGLIP_CACHE)
     if not os.path.exists(REDUX_CACHE):
         download_weights(REDUX_URL, REDUX_CACHE)
-    
+
     return ReduxImageEncoder(device, redux_path = REDUX_CACHE, siglip_path=SIGLIP_CACHE, dtype=torch.bfloat16)
 
 def load_depth_encoder(device: str | torch.device = "cuda") -> DepthImageEncoder:
     if not os.path.exists(DEPTH_CACHE):
         download_weights(DEPTH_URL, DEPTH_CACHE)
-    
+
     return DepthImageEncoder(device, DEPTH_CACHE)
 
 

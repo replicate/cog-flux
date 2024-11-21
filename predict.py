@@ -32,7 +32,7 @@ from einops import rearrange
 from PIL import Image
 from typing import List
 from torchvision import transforms
-from cog import BasePredictor, Input, Path
+from cog import BasePredictor, Input, Path  # type: ignore
 from flux.util import (
     load_ae,
     load_clip,
@@ -134,6 +134,11 @@ class Inputs:
         choices=["1", "0.25"],
         default="1",
     )
+    megapixels_with_match_input = Input(
+        description="Approximate number of megapixels for generated image. Use match_input to match the size of the input (with an upper limit of 1440x1440 pixels)",
+        choices=["1", "0.25", "match_input"],
+        default="1",
+    )
 
     @property
     def go_fast(self) -> Input:
@@ -207,7 +212,7 @@ class Predictor(BasePredictor):
         print("Loading Safety Checker to GPU")
         self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
             SAFETY_CACHE, torch_dtype=torch.float16
-        ).to("cuda")
+        ).to("cuda")  # type: ignore
         self.feature_extractor = CLIPImageProcessor.from_pretrained(FEATURE_EXTRACTOR)
 
         print("Loading Falcon safety checker...")
@@ -281,7 +286,7 @@ class Predictor(BasePredictor):
             self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
                 f"fp8/configs/config-1-{flow_model_name}-h100.json",
                 shared_models=shared_models,
-                **extra_args,
+                **extra_args,  # type: ignore
             )
 
             if compile_fp8:
@@ -300,7 +305,7 @@ class Predictor(BasePredictor):
             num_steps=self.num_steps,
             guidance=3,
             seed=123,
-            compiling=compile,
+            compiling=True,
         )
 
         for k in ASPECT_RATIOS:
@@ -321,20 +326,20 @@ class Predictor(BasePredictor):
 
     # TODO(andreas): This is never used and will throw an error if
     # used because aspect_ratio is not a valid argument to bf16_predict
-    def compile_bf16(self):
-        print("compiling bf16 model")
-        st = time.time()
+    # def compile_bf16(self):
+    #     print("compiling bf16 model")
+    #     st = time.time()
 
-        self.compile_run = True
-        self.bf16_predict(
-            prompt="a cool dog",
-            aspect_ratio="1:1",
-            num_outputs=1,
-            num_inference_steps=self.num_steps,
-            guidance=3.5,
-            seed=123,
-        )
-        print("compiled in ", time.time() - st)
+    #     self.compile_run = True
+    #     self.bf16_predict(
+    #         prompt="a cool dog",
+    #         aspect_ratio="1:1",
+    #         num_outputs=1,
+    #         num_inference_steps=self.num_steps,
+    #         guidance=3.5,
+    #         seed=123,
+    #     )
+    #     print("compiled in ", time.time() - st)
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str) -> tuple[int, int]:
         return ASPECT_RATIOS[aspect_ratio]
@@ -429,7 +434,9 @@ class Predictor(BasePredictor):
             self.bf16_lora = lora_weights
             self.bf16_lora_scale = lora_scale
 
-    def preprocess(self, aspect_ratio: str, megapixels: str = "1") -> Tuple[int, int]:
+    def size_from_aspect_megapixels(
+        self, aspect_ratio: str, megapixels: str = "1"
+    ) -> Tuple[int, int]:
         width, height = ASPECT_RATIOS[aspect_ratio]
         if megapixels == "0.25":
             width, height = width // 2, height // 2
@@ -465,7 +472,9 @@ class Predictor(BasePredictor):
 
         if mask_path:
             assert image_path is not None
-            img_cond, width, height = self.prepare_img_cond(image_path, mask_path)
+            img_cond = self.prepare_img_cond(
+                image_path, mask_path, width=width, height=height
+            )
 
         elif control_image_embedder is not None:
             img_cond = self.prepare_control(
@@ -477,6 +486,9 @@ class Predictor(BasePredictor):
 
         # img2img only works for flux-dev
         elif image_path is not None:
+            # For backwards compatibility, we still preserve width and
+            # height for init_images, as opposed to using megapixels
+            # with a "match_input" value.
             init_image, width, height = self.prepare_init_image(image_path)
 
         # prepare input
@@ -637,7 +649,7 @@ class Predictor(BasePredictor):
         return output_paths
 
     def run_safety_checker(self, images, np_images):
-        safety_checker_input = self.feature_extractor(images, return_tensors="pt").to(
+        safety_checker_input = self.feature_extractor(images, return_tensors="pt").to(  # type: ignore
             "cuda"
         )
         image, has_nsfw_concept = self.safety_checker(
@@ -648,7 +660,7 @@ class Predictor(BasePredictor):
 
     def run_falcon_safety_checker(self, image):
         with torch.no_grad():
-            inputs = self.falcon_processor(images=image, return_tensors="pt")
+            inputs = self.falcon_processor(images=image, return_tensors="pt")  # type: ignore
             outputs = self.falcon_model(**inputs)
             logits = outputs.logits
             predicted_label = logits.argmax(-1).item()
@@ -710,7 +722,7 @@ class Predictor(BasePredictor):
         init_image = load_image_tensor(image_path).to(torch_device)
         init_image, width, height = maybe_scale_to_closest_multiple(
             init_image, multiple=16
-        )  # is 16 correct?
+        )
 
         with self.maybe_offload_ae():
             init_image = self.ae.encode(init_image)
@@ -718,10 +730,16 @@ class Predictor(BasePredictor):
         return init_image, width, height
 
     def prepare_control(
-        self, image_path: Path, image_embedder: ImageEncoder, width: int, height: int
+        self,
+        image_path: Path,
+        image_embedder: ImageEncoder,
+        width: int,
+        height: int,
     ) -> torch.Tensor:
-        image = load_image_tensor(image_path)
-        image = maybe_scale_to_size(image, width, height)
+        image_pil = load_image(image_path)
+        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height).to(
+            torch.device("cuda")
+        )
 
         with torch.no_grad():
             img_cond = image_embedder(image)
@@ -732,14 +750,22 @@ class Predictor(BasePredictor):
         return rearrange(img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
 
     def prepare_img_cond(
-        self, image_path: Path, mask_path: Path
-    ) -> tuple[torch.Tensor, int, int]:
+        self,
+        image_path: Path,
+        mask_path: Path,
+        width: int,
+        height: int,
+    ) -> torch.Tensor:
         torch_device = torch.device("cuda")
 
-        image = load_image_tensor(image_path).to(torch_device)
-        mask = load_grayscale_image_tensor(mask_path).to(torch_device)
-        image, width, height = maybe_scale_to_closest_multiple(image, multiple=32)
-        mask = maybe_scale_to_size(mask, width, height)
+        image_pil = load_image(image_path)
+        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height).to(
+            torch_device
+        )
+        mask_pil = load_image(mask_path, grayscale=True)
+        mask = maybe_scale_to_size_and_convert_to_tensor(
+            mask_pil, width, height, grayscale=True
+        ).to(torch_device)
 
         # TODO(andreas): support image inputs with alpha channels
         with torch.no_grad():
@@ -763,9 +789,34 @@ class Predictor(BasePredictor):
         img_cond = rearrange(
             img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2
         )
-        img_cond = torch.cat((img_cond, mask), dim=-1)
+        return torch.cat((img_cond, mask), dim=-1)
 
-        return img_cond, width, height
+    def size_maybe_match_input(
+        self, image_path: Path, megapixels: str
+    ) -> tuple[int, int]:
+        image = Image.open(image_path)
+        width, height = image.size
+
+        # 32 since that's what fill is using
+        def round_to_nearest_multiple_of_32(width: int, height: int) -> tuple[int, int]:
+            return int(width / 32) * 32, int(height / 32) * 32
+
+        if megapixels == "match_input":
+            # scale down if needed to fit within MAX_IMAGE_SIZE
+            scale = min(MAX_IMAGE_SIZE / width, MAX_IMAGE_SIZE / height, 1)
+            if scale < 1:
+                width = int(width * scale)
+                height = int(height * scale)
+            return round_to_nearest_multiple_of_32(width, height)
+
+        target_pixels = int(float(megapixels) * 1024 * 1024)
+        current_pixels = width * height
+        scale = (target_pixels / current_pixels) ** 0.5
+
+        width = int(width * scale)
+        height = int(height * scale)
+
+        return round_to_nearest_multiple_of_32(width, height)
 
     @contextmanager
     def maybe_offload_ae(self):
@@ -798,7 +849,7 @@ class SchnellPredictor(Predictor):
         go_fast: bool = Inputs.go_fast,
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
-        width, height = self.preprocess(aspect_ratio, megapixels)
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
@@ -851,7 +902,7 @@ class DevPredictor(Predictor):
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
-        width, height = self.preprocess(aspect_ratio, megapixels)
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
@@ -898,7 +949,7 @@ class SchnellLoraPredictor(Predictor):
     ) -> List[Path]:
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
-        width, height = self.preprocess(aspect_ratio, megapixels)
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
@@ -957,7 +1008,7 @@ class DevLoraPredictor(Predictor):
 
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
-        width, height = self.preprocess(aspect_ratio, megapixels)
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
@@ -994,7 +1045,8 @@ class _ReduxPredictor(Predictor):
             x,
             prompt=prompt,
             encoder=self.redux_image_encoder,
-            img_cond_path=self.cur_prediction_redux_img,
+            # TODO(andreas): Refactor this so we don't have to ignore the type here
+            img_cond_path=self.cur_prediction_redux_img,  # type: ignore
         )
 
 
@@ -1029,7 +1081,7 @@ class SchnellReduxPredictor(_ReduxPredictor):
         # TODO: don't love passing this via a class variable, but it's better than totally breaking our abstractions.
         self.cur_prediction_redux_img = redux_image
 
-        width, height = self.preprocess(aspect_ratio, megapixels)
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
@@ -1083,7 +1135,7 @@ class DevReduxPredictor(_ReduxPredictor):
         # TODO: don't love passing this via a class variable, but it's better than totally breaking our abstractions.
         self.cur_prediction_redux_img = redux_image
 
-        width, height = self.preprocess(aspect_ratio, megapixels)
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
@@ -1296,7 +1348,6 @@ class CannyDevPredictor(Predictor):
         control_image: Path = Input(
             description="Image used to control the generation. The canny edge detection will be automatically generated."
         ),
-        aspect_ratio: str = Inputs.aspect_ratio,
         num_outputs: int = Inputs.num_outputs,
         num_inference_steps: int = Inputs.num_inference_steps_with(
             le=50, default=28, recommended=(28, 50)
@@ -1306,9 +1357,12 @@ class CannyDevPredictor(Predictor):
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
-        megapixels: str = Inputs.megapixels,
+        megapixels: str = Inputs.megapixels_with_match_input,
     ) -> List[Path]:
-        width, height = self.preprocess(aspect_ratio, megapixels)
+        # TODO(andreas): This means we're reading the image twice
+        # which is a bit inefficient.
+        width, height = self.size_maybe_match_input(control_image, megapixels)
+
         imgs, np_imgs = self.shared_predict(
             go_fast=False,
             prompt=prompt,
@@ -1341,7 +1395,6 @@ class DepthDevPredictor(Predictor):
         control_image: Path = Input(
             description="Image used to control the generation. The depth map will be automatically generated."
         ),
-        aspect_ratio: str = Inputs.aspect_ratio,
         num_outputs: int = Inputs.num_outputs,
         num_inference_steps: int = Inputs.num_inference_steps_with(
             le=50, default=28, recommended=(28, 50)
@@ -1351,9 +1404,12 @@ class DepthDevPredictor(Predictor):
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
-        megapixels: str = Inputs.megapixels,
+        megapixels: str = Inputs.megapixels_with_match_input,
     ) -> List[Path]:
-        width, height = self.preprocess(aspect_ratio, megapixels)
+        # TODO(andreas): This means we're reading the image twice
+        # which is a bit inefficient.
+        width, height = self.size_maybe_match_input(control_image, megapixels)
+
         imgs, np_imgs = self.shared_predict(
             go_fast=False,
             prompt=prompt,
@@ -1391,18 +1447,7 @@ def load_image_tensor(image_path: Path) -> Tensor:
             transforms.Lambda(lambda x: 2.0 * x - 1.0),
         ]
     )
-    img: Tensor = transform(image)
-    return img[None, ...]
-
-
-def load_grayscale_image_tensor(image_path: Path) -> Tensor:
-    image = Image.open(image_path).convert("L")
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-        ]
-    )
-    img: Tensor = transform(image)
+    img: Tensor = transform(image)  # type: ignore
     return img[None, ...]
 
 
@@ -1431,11 +1476,53 @@ def maybe_scale_to_closest_multiple(
     return image, width, height
 
 
-def maybe_scale_to_size(image: Tensor, width: int, height: int) -> Tensor:
-    image_width = image.shape[-1]
-    image_height = image.shape[-2]
+def load_image(image_path: Path, grayscale: bool = False) -> Image.Image:
+    return Image.open(image_path).convert("L" if grayscale else "RGB")
 
-    if image_width == width and image_height == height:
-        return image
 
-    return torch.nn.functional.interpolate(image, (height, width))
+def maybe_scale_to_size_and_convert_to_tensor(
+    image: Image.Image, width: int, height: int, grayscale: bool = False
+) -> Tensor:
+    if grayscale:
+        transform = transforms.ToTensor()
+    else:
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: 2.0 * x - 1.0),
+            ]
+        )
+
+    if image.size == (width, height):
+        return transform(image)[None, ...]  # type: ignore
+
+    # Resize with Lanczos
+    resized = image.resize((width, height), Image.Resampling.LANCZOS)
+    return transform(resized)[None, ...]  # type: ignore
+
+def maybe_crop_to_size_and_convert_to_tensor(
+    image: Image.Image, width: int, height: int, grayscale: bool = False
+) -> Tensor:
+    if grayscale:
+        transform = transforms.ToTensor()
+    else:
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: 2.0 * x - 1.0),
+            ]
+        )
+
+    if image.size == (width, height):
+        return transform(image)[None, ...]  # type: ignore
+
+    # Calculate crop box for center crop
+    img_width, img_height = image.size
+    left = (img_width - width) // 2
+    top = (img_height - height) // 2
+    right = left + width
+    bottom = top + height
+
+    # Center crop
+    cropped = image.crop((left, top, right, bottom))
+    return transform(cropped)[None, ...]  # type: ignore

@@ -550,7 +550,7 @@ class FluxPipeline:
         num_images: int = 1,
         jpeg_quality: int = 99,
         compiling: bool = False,
-    ) -> io.BytesIO:
+    ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """
         Generate images based on the given prompt and parameters.
 
