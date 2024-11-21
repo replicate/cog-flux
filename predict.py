@@ -1300,7 +1300,7 @@ class CannyDevPredictor(Predictor):
         aspect_ratio: str = Inputs.aspect_ratio,
         num_outputs: int = Inputs.num_outputs,
         num_inference_steps: int = Inputs.num_inference_steps_with(
-            le=50, default=50, recommended=(28, 50)
+            le=50, default=28, recommended=(28, 50)
         ),
         guidance: float = Inputs.guidance_with(default=30, le=100),
         seed: int = Inputs.seed,
@@ -1345,7 +1345,7 @@ class DepthDevPredictor(Predictor):
         aspect_ratio: str = Inputs.aspect_ratio,
         num_outputs: int = Inputs.num_outputs,
         num_inference_steps: int = Inputs.num_inference_steps_with(
-            le=50, default=50, recommended=(28, 50)
+            le=50, default=28, recommended=(28, 50)
         ),
         guidance: float = Inputs.guidance_with(default=10, le=100),
         seed: int = Inputs.seed,
