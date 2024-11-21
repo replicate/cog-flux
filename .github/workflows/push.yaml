@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: 'Comma-separated list of models to push (schnell,dev,fill-dev,canny-dev,depth-dev,schnell-lora,dev-lora,hotswap-lora) or "all"'
+        description: 'Comma-separated list of models to push (schnell,dev,fill-dev,canny-dev,depth-dev,redux-dev,redux-schnell,schnell-lora,dev-lora,hotswap-lora) or "all"'
         type: string
         default: 'all'
 
@@ -40,7 +40,7 @@ jobs:
         REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
       run: |
         if [ "${{ inputs.models }}" = "all" ]; then
-          models="schnell,dev,fill-dev,canny-dev,depth-dev,schnell-lora,dev-lora,hotswap-lora"
+          models="schnell,dev,fill-dev,canny-dev,depth-dev,redux-dev,redux-schnell,schnell-lora,dev-lora,hotswap-lora"
         else
           models="${{ inputs.models }}"
         fi
