@@ -737,9 +737,7 @@ class Predictor(BasePredictor):
         height: int,
     ) -> torch.Tensor:
         image_pil = load_image(image_path)
-        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height).to(
-            torch.device("cuda")
-        )
+        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height)
 
         with torch.no_grad():
             img_cond = image_embedder(image)
