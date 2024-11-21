@@ -10,5 +10,5 @@ predict:
     - inputs:
         prompt: A stormtrooper giving a lecture at a university
         control_image: https://replicate.delivery/pbxt/IKFvJn5EpLuDDsFysOP4B1J9HvKDbMBCwZUK9n6p9mIPoQwG/sd.png
-        seed: 2
+        seed: 36414
       match_prompt: An image of storm trooper
