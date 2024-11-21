@@ -168,7 +168,7 @@ def denoise_single_item(
     txt_ids = txt_ids.unsqueeze(0)
     vec = vec.unsqueeze(0)
     guidance_vec = torch.full((1,), guidance, device=img.device, dtype=img.dtype)
-    img_cond = img_cond.unsqueeze(0) if img_cond else None
+    img_cond = None if img_cond is None else img_cond.unsqueeze(0)
 
     if compile_run:
         torch._dynamo.mark_dynamic(
