@@ -44,7 +44,6 @@ from flux.util import (
 )
 from flux.modules.image_embedders import (
     ImageEncoder,
-    DepthImageEncoder,
     CannyImageEncoder,
 )
 
