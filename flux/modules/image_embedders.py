@@ -29,10 +29,10 @@ class ImageEncoder(Protocol):
 class DepthImageEncoder(ImageEncoder):
     depth_model_name = "LiheYoung/depth-anything-large-hf"
 
-    def __init__(self, device):
+    def __init__(self, device, depth_model_path=depth_model_name):
         self.device = device
-        self.depth_model = AutoModelForDepthEstimation.from_pretrained(self.depth_model_name).to(device)
-        self.processor = AutoProcessor.from_pretrained(self.depth_model_name)
+        self.depth_model = AutoModelForDepthEstimation.from_pretrained(depth_model_path).to(device)
+        self.processor = AutoProcessor.from_pretrained(depth_model_path)
 
     def __call__(self, img: torch.Tensor) -> torch.Tensor:
         hw = img.shape[-2:]

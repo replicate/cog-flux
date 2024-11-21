@@ -36,6 +36,7 @@ from cog import BasePredictor, Input, Path
 from flux.util import (
     load_ae,
     load_clip,
+    load_depth_encoder,
     load_flow_model,
     load_redux,
     load_t5,
@@ -1288,6 +1289,7 @@ class HotswapPredictor(BasePredictor):
 class CannyDevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-canny-dev", disable_fp8=True)
+        self.control_image_embedder = CannyImageEncoder(torch.device("cuda"))
 
     def predict(
         self,
@@ -1318,7 +1320,7 @@ class CannyDevPredictor(Predictor):
             width=width,
             height=height,
             image=control_image,
-            control_image_embedder=CannyImageEncoder(torch.device("cuda")),
+            control_image_embedder=self.control_image_embedder,
         )
         return self.postprocess(
             imgs,
@@ -1332,6 +1334,7 @@ class CannyDevPredictor(Predictor):
 class DepthDevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-depth-dev", disable_fp8=True)
+        self.control_image_embedder = load_depth_encoder("cuda")
 
     def predict(
         self,
@@ -1362,7 +1365,7 @@ class DepthDevPredictor(Predictor):
             width=width,
             height=height,
             image=control_image,
-            control_image_embedder=DepthImageEncoder(torch.device("cuda")),
+            control_image_embedder=self.control_image_embedder,
         )
         return self.postprocess(
             imgs,

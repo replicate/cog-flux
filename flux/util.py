@@ -9,7 +9,7 @@ from safetensors.torch import load_file as load_sft
 from flux.model import Flux, FluxParams
 from flux.modules.autoencoder import AutoEncoder, AutoEncoderParams
 from flux.modules.conditioner import HFEmbedder
-from flux.modules.image_embedders import ReduxImageEncoder
+from flux.modules.image_embedders import DepthImageEncoder, ReduxImageEncoder
 from flux.modules.quantize import replace_linear_weight_only_int8_per_channel
 from huggingface_hub import hf_hub_download
 from pathlib import Path
@@ -44,6 +44,8 @@ SIGLIP_URL = "https://weights.replicate.delivery/default/google/siglip-so400m-pa
 SIGLIP_CACHE = "./model-cache/siglip"
 REDUX_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-redux-dev.safetensors"
 REDUX_CACHE = "./model-cache/redux/flux1-redux-dev.safetensors"
+DEPTH_URL = "https://weights.replicate.delivery/default/liheyoung/depth-anything-large/flux-depth-model.tar"
+DEPTH_CACHE = "./model-cache/depth"
 
 configs = {
     "flux-dev": ModelSpec(
@@ -287,6 +289,12 @@ def load_redux(device: str | torch.device = "cuda") -> ReduxImageEncoder:
         download_weights(REDUX_URL, REDUX_CACHE)
     
     return ReduxImageEncoder(device, redux_path = REDUX_CACHE, siglip_path=SIGLIP_CACHE, dtype=torch.bfloat16)
+
+def load_depth_encoder(device: str | torch.device = "cuda") -> DepthImageEncoder:
+    if not os.path.exists(DEPTH_CACHE):
+        download_weights(DEPTH_URL, DEPTH_CACHE)
+    
+    return DepthImageEncoder(device, DEPTH_CACHE)
 
 
 def download_ckpt_from_hf(
