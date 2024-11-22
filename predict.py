@@ -18,7 +18,7 @@ from fp8.util import LoadedModels
 from fp8.lora_loading import load_lora, unload_loras
 
 import numpy as np
-from einops import rearrange
+from einops import rearrange, repeat
 from PIL import Image
 from typing import List
 from torchvision import transforms
@@ -35,13 +35,13 @@ from transformers import (
 )
 from weights import WeightsDownloadCache
 
-SAFETY_CACHE = Path("/src/safety-cache")
-FEATURE_EXTRACTOR = Path("/src/feature-extractor")
+SAFETY_CACHE = Path("./safety-cache")
+FEATURE_EXTRACTOR = Path("./feature-extractor")
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
 MAX_IMAGE_SIZE = 1440
 
 FALCON_MODEL_NAME = "Falconsai/nsfw_image_detection"
-FALCON_MODEL_CACHE = Path("/src/falcon-cache")
+FALCON_MODEL_CACHE = Path("./falcon-cache")
 FALCON_MODEL_URL = (
     "https://weights.replicate.delivery/default/falconai/nsfw-image-detection.tar"
 )
@@ -189,6 +189,7 @@ class Predictor(BasePredictor):
 
         # fp8 only works w/compute capability >= 8.9
         self.disable_fp8 = disable_fp8 or torch.cuda.get_device_capability() < (8, 9)
+        self.vae_scale_factor = 8
 
         if not self.disable_fp8:
             self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
@@ -249,10 +250,10 @@ class Predictor(BasePredictor):
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         return ASPECT_RATIOS.get(aspect_ratio)
 
-    def get_image(self, image: str):
+    def get_image(self, image: str, mode="RGB"):
         if image is None:
             return None
-        image = Image.open(image).convert("RGB")
+        image = Image.open(image).convert(mode)
         transform = transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -318,6 +319,7 @@ class Predictor(BasePredictor):
         seed: int = None,
         width: int = 1024,
         height: int = 1024,
+        mask: Path = None, # inpainting for flux-defv
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -366,6 +368,7 @@ class Predictor(BasePredictor):
             dtype=torch.bfloat16,
             seed=seed,
         )
+        noise = x
         timesteps = get_schedule(
             num_inference_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift
         )
@@ -379,6 +382,20 @@ class Predictor(BasePredictor):
         if self.offload:
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
+        
+        if mask:
+            mask = self.get_image(mask, mode="L")
+            mask_height = int(height) // self.vae_scale_factor
+            mask_width = int(width) // self.vae_scale_factor
+            mask = torch.nn.functional.interpolate(mask, size=(mask_height, mask_width))
+            mask = mask.to(device=torch_device, dtype=torch.bfloat16)
+
+            def pack_img(img):
+                return rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
+            
+            inp['noise'] = pack_img(noise)
+            inp['mask'] = pack_img(mask.repeat(1, 16, 1, 1))
+            inp['image_latents'] = pack_img(init_image.to(dtype=torch.bfloat16))
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
@@ -524,6 +541,7 @@ class Predictor(BasePredictor):
         seed: int = None,
         width: int = 1024,
         height: int = 1024,
+        mask: Path = None # inpainting 
     ):
         if go_fast and not self.disable_fp8:
             return self.fp8_predict(
@@ -549,6 +567,7 @@ class Predictor(BasePredictor):
             seed=seed,
             width=width,
             height=height,
+            mask=mask
         )
 
 
@@ -770,9 +789,16 @@ class DevLoraPredictor(Predictor):
 class BigPredictor(BasePredictor):
     def setup(self) -> None:
         self.schnell_lora = SchnellLoraPredictor()
-        self.schnell_lora.setup()
-        self.dev_lora = DevLoraPredictor()
-        self.dev_lora.setup()
+        # self.schnell_lora.setup()
+
+        self.schnell_lora.base_setup("flux-schnell", compile_fp8=False)
+        self.schnell_lora.lora_setup()
+        
+        #self.dev_lora = DevLoraPredictor()
+        #self.dev_lora.setup()
+
+        # self.dev_lora.base_setup("flux-dev", compile_fp8=False)
+        # self.dev_lora.lora_setup()
 
     def predict(self,
         prompt: str = SHARED_INPUTS.prompt,
@@ -858,11 +884,34 @@ class BigPredictor(BasePredictor):
         if extra_lora:
             # extra_lora - this is actually fairly complicated. we're going to break this. 
             # TODO: model.cram_loras_in_there()
+            # not a common thing to do tbh
+            pass
         
-        # mask - would need to add inpainting support. le sigh. 
-        # option 1 - implement this
-        # option 2 - just yank it, I guess? ugh. No, our fp8 compilation framework won't like that. do the implementation, that's better. 
+        if mask and go_fast:
+            print("Inpainting not supported with fast fp8 inference; will run in bf16")
+            go_fast = False
 
+        imgs, np_imgs = model.shared_predict(
+            go_fast,
+            prompt,
+            num_outputs,
+            num_inference_steps,
+            guidance=guidance_scale,
+            image=image,
+            prompt_strength=prompt_strength,
+            seed=seed,
+            width=width,
+            height=height,
+            mask=mask
+        )
+
+        return model.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
 
 class TestPredictor(Predictor):
     def setup(self) -> None:

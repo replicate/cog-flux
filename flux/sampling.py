@@ -105,7 +105,9 @@ def denoise_single_item(
     timesteps: list[float],
     guidance: float = 4.0,
     compile_run: bool = False,
+    image_latents: Optional[Tensor] = None,
     mask: Optional[Tensor] = None,
+    noise: Optional[Tensor] = None
 ):
     img = img.unsqueeze(0)
     img_ids = img_ids.unsqueeze(0)
@@ -135,7 +137,15 @@ def denoise_single_item(
 
         img = img + (t_prev - t_curr) * pred.squeeze(0)
 
-        if mask:
+        if mask is not None:
+            # if i < len(timesteps) - 1:
+            if t_prev != timesteps[-1]:
+                proper_noise_latents = t_prev * noise + (1.0 - t_prev) * image_latents
+            else:
+                proper_noise_latents = image_latents
+
+            img = (1 - mask) * proper_noise_latents + mask * img
+
             
 
     return img, model
@@ -151,7 +161,10 @@ def denoise(
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
-    compile_run: bool = False
+    compile_run: bool = False,
+    image_latents: Optional[Tensor] = None,
+    mask: Optional[Tensor] = None,
+    noise: Optional[Tensor] = None
 ):
     batch_size = img.shape[0]
     output_imgs = []
@@ -166,7 +179,10 @@ def denoise(
             vec[i],
             timesteps,
             guidance,
-            compile_run
+            compile_run,
+            image_latents,
+            mask,
+            noise
         )
         compile_run = False
         output_imgs.append(denoised_img)
