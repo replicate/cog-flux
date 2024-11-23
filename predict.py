@@ -250,10 +250,10 @@ class Predictor(BasePredictor):
     def aspect_ratio_to_width_height(self, aspect_ratio: str):
         return ASPECT_RATIOS.get(aspect_ratio)
 
-    def get_image(self, image: str, mode="RGB"):
+    def get_image(self, image: str):
         if image is None:
             return None
-        image = Image.open(image).convert(mode)
+        image = Image.open(image).convert("RGB")
         transform = transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -261,6 +261,20 @@ class Predictor(BasePredictor):
             ]
         )
         img: torch.Tensor = transform(image)
+        return img[None, ...]
+    
+    def get_mask(self, image: str):
+        if image is None:
+            return None
+        image = Image.open(image).convert("L")
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+            ]
+        )
+        img: torch.Tensor = transform(image)
+        img[img < 0.5] = 0
+        img[img > 0.5] = 1
         return img[None, ...]
 
     def predict():
@@ -384,7 +398,7 @@ class Predictor(BasePredictor):
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
         
         if mask:
-            mask = self.get_image(mask, mode="L")
+            mask = self.get_mask(mask)
             mask_height = int(height) // self.vae_scale_factor
             mask_width = int(width) // self.vae_scale_factor
             mask = torch.nn.functional.interpolate(mask, size=(mask_height, mask_width))
@@ -789,13 +803,13 @@ class DevLoraPredictor(Predictor):
 class BigPredictor(BasePredictor):
     def setup(self) -> None:
         self.schnell_lora = SchnellLoraPredictor()
-        # self.schnell_lora.setup()
+        self.schnell_lora.setup()
 
-        self.schnell_lora.base_setup("flux-schnell", compile_fp8=False)
-        self.schnell_lora.lora_setup()
+        # self.schnell_lora.base_setup("flux-schnell", compile_fp8=False)
+        # self.schnell_lora.lora_setup()
         
-        #self.dev_lora = DevLoraPredictor()
-        #self.dev_lora.setup()
+        self.dev_lora = DevLoraPredictor()
+        self.dev_lora.setup()
 
         # self.dev_lora.base_setup("flux-dev", compile_fp8=False)
         # self.dev_lora.lora_setup()

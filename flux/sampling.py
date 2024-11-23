@@ -136,17 +136,13 @@ def denoise_single_item(
         )
 
         img = img + (t_prev - t_curr) * pred.squeeze(0)
-
         if mask is not None:
-            # if i < len(timesteps) - 1:
             if t_prev != timesteps[-1]:
                 proper_noise_latents = t_prev * noise + (1.0 - t_prev) * image_latents
             else:
                 proper_noise_latents = image_latents
 
             img = (1 - mask) * proper_noise_latents + mask * img
-
-            
 
     return img, model
 
