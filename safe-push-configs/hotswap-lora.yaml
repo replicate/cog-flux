@@ -21,7 +21,7 @@ predict:
     - inputs:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 1
-        num_inference_steps: 28
+        num_inference_steps: 4
         model: schnell
         guidance_scale: 2.5
         seed: 8888
@@ -35,7 +35,7 @@ predict:
     - inputs:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 4
-        num_inference_steps: 28
+        num_inference_steps: 4
         model: schnell
         guidance_scale: 2.5
         seed: 8888
@@ -77,7 +77,7 @@ predict:
     - inputs:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 1
-        num_inference_steps: 28
+        num_inference_steps: 4
         guidance_scale: 2.5
         seed: 8888
         model: schnell
@@ -102,7 +102,7 @@ predict:
     - inputs:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 1
-        num_inference_steps: 28
+        num_inference_steps: 4
         guidance_scale: 2.5
         seed: 8888
         output_format: jpg
@@ -129,7 +129,7 @@ predict:
         mask: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/inpainting-mask.png
         aspect_ratio: "1:1"
         prompt_strength: 1.0
-        model: dev,
+        model: dev
         num_outputs: 1
         num_inference_steps: 28
         go_fast: True
@@ -154,7 +154,7 @@ predict:
         lora_scale: 0.9
       match_prompt: A 768x768 image of a woman at a rave with pink hair who looks like the Mona Lisa
 
-
+    # multi-lora
     - inputs:
         prompt: A portrait photo of MNALSA woman sitting at a party table with a selection of bad 70s food
         num_outputs: 1
