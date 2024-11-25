@@ -859,7 +859,9 @@ class HotswapPredictor(BasePredictor):
 
     def predict(
         self,
-        prompt: str = Input(description="Prompt for generated image. If you include the `trigger_word` used in the training process you are more likely to activate the trained object, style, or concept in the resulting image."),
+        prompt: str = Input(
+            description="Prompt for generated image. If you include the `trigger_word` used in the training process you are more likely to activate the trained object, style, or concept in the resulting image."
+        ),
         image: Path = Input(
             description="Input image for image to image or inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored.",
             default=None,
@@ -904,7 +906,10 @@ class HotswapPredictor(BasePredictor):
             default=28,
         ),
         guidance_scale: float = Input(
-            description="Guidance scale for the diffusion process. Lower values can give more realistic images. Good values to try are 2, 2.5, 3 and 3.5", ge=0, le=10, default=3
+            description="Guidance scale for the diffusion process. Lower values can give more realistic images. Good values to try are 2, 2.5, 3 and 3.5",
+            ge=0,
+            le=10,
+            default=3,
         ),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
