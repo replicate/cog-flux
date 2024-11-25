@@ -15,7 +15,7 @@ from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 from fp8.flux_pipeline import FluxPipeline
 from fp8.util import LoadedModels
-from fp8.lora_loading import load_lora, unload_loras
+from fp8.lora_loading import load_lora, load_loras, unload_loras
 
 import numpy as np
 from einops import rearrange, repeat
@@ -286,6 +286,8 @@ class Predictor(BasePredictor):
         go_fast: bool,
         lora_weights: str | None = None,
         lora_scale: float = 1.0,
+        extra_lora_weights: str | None = None,
+        extra_lora_scale: float = 1.0
     ):
         if go_fast:
             model = self.fp8_pipe.model
@@ -303,12 +305,16 @@ class Predictor(BasePredictor):
             self.bf16_lora = "loading"
 
         if lora_weights:
-            # since we merge weights, need to reload for change in scale.
-            if lora_weights != cur_lora or lora_scale != cur_scale:
+            # since we merge weights, need to reload for change in scale. auto-reloading for extra weights
+            if lora_weights != cur_lora or lora_scale != cur_scale or extra_lora_weights:
                 if cur_lora:
                     unload_loras(model)
                 lora_path = self.weights_cache.ensure(lora_weights)
-                load_lora(model, lora_path, lora_scale)
+                if extra_lora_weights:
+                    extra_lora_path = self.weights_cache.ensure(extra_lora_weights)
+                    load_loras(model, [lora_path, extra_lora_path], [lora_scale, extra_lora_scale])
+                else:
+                    load_lora(model, lora_path, lora_scale)
             else:
                 print(f"Lora {lora_weights} already loaded")
         elif cur_lora:
@@ -896,18 +902,7 @@ class BigPredictor(BasePredictor):
         else:
             height, width = model.preprocess(aspect_ratio, megapixels=megapixels)
             
-
-        if extra_lora and go_fast:
-            print("Multiple loras not supported in fp8, running in bf16")
-            go_fast = False
-
-        model.handle_loras(go_fast, lora_weights, lora_scale)
-        
-        if extra_lora:
-            # extra_lora - this is actually fairly complicated. we're going to break this. 
-            # TODO: model.cram_loras_in_there()
-            # not a common thing to do tbh
-            pass
+        model.handle_loras(go_fast, lora_weights, lora_scale, extra_lora, extra_lora_scale)
         
         if mask and go_fast:
             print("Inpainting not supported with fast fp8 inference; will run in bf16")
