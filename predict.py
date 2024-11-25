@@ -854,24 +854,18 @@ class HotswapPredictor(BasePredictor):
         self.schnell_lora = SchnellLoraPredictor()
         self.schnell_lora.setup()
 
-        # self.schnell_lora.base_setup("flux-schnell", compile_fp8=False)
-        # self.schnell_lora.lora_setup()
-
         self.dev_lora = DevLoraPredictor()
         self.dev_lora.setup()
 
-        # self.dev_lora.base_setup("flux-dev", compile_fp8=False)
-        # self.dev_lora.lora_setup()
-
     def predict(
         self,
-        prompt: str = SHARED_INPUTS.prompt,
+        prompt: str = Input(description="Prompt for generated image. If you include the `trigger_word` used in the training process you are more likely to activate the trained object, style, or concept in the resulting image."),
         image: Path = Input(
-            description="Input image for image to image mode. The aspect ratio of your output will match this image",
+            description="Input image for image to image or inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored.",
             default=None,
         ),
         mask: Path = Input(
-            description="Image mask for image inpainting mode. The aspect ratio of your output will match this image",
+            description="Image mask for image inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored.",
             default=None,
         ),
         aspect_ratio: str = Input(
@@ -879,12 +873,16 @@ class HotswapPredictor(BasePredictor):
             choices=list(ASPECT_RATIOS.keys()) + ["custom"],
             default="1:1",
         ),
-        height: str = Input(
-            description="Height of generated image. Only works if `aspect_ratio` is set to custom. Incompatible with fast generation",
+        height: int = Input(
+            description="Height of generated image. Only works if `aspect_ratio` is set to custom. Will be rounded to nearest multiple of 16. Incompatible with fast generation",
+            ge=256,
+            le=1440,
             default=None,
         ),
-        width: str = Input(
-            description="Width of generated image. Only works if `aspect_ratio` is set to custom. Incompatible with fast generation",
+        width: int = Input(
+            description="Width of generated image. Only works if `aspect_ratio` is set to custom. Will be rounded to nearest multiple of 16. Incompatible with fast generation",
+            ge=256,
+            le=1440,
             default=None,
         ),
         prompt_strength: float = Input(
@@ -894,19 +892,19 @@ class HotswapPredictor(BasePredictor):
             default=0.80,
         ),
         model: str = Input(
-            description="which model do you want to run, dev or schnell?",
+            description="Which model to run inference with. The dev model performs best with around 28 inference steps but the schnell model only needs 4 steps.",
             choices=["dev", "schnell"],
             default="dev",
         ),
         num_outputs: int = SHARED_INPUTS.num_outputs,
         num_inference_steps: int = Input(
-            description="Number of denoising steps. Recommended range is 28-50",
+            description="Number of denoising steps. More steps can give more detailed images, but take longer.",
             ge=1,
             le=50,
             default=28,
         ),
         guidance_scale: float = Input(
-            description="Guidance for generated image", ge=0, le=10, default=3
+            description="Guidance scale for the diffusion process. Lower values can give more realistic images. Good values to try are 2, 2.5, 3 and 3.5", ge=0, le=10, default=3
         ),
         seed: int = SHARED_INPUTS.seed,
         output_format: str = SHARED_INPUTS.output_format,
@@ -914,17 +912,17 @@ class HotswapPredictor(BasePredictor):
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
         go_fast: bool = SHARED_INPUTS.go_fast,
         megapixels: str = SHARED_INPUTS.megapixels,
-        lora_weights: str = SHARED_INPUTS.lora_weights,
+        replicate_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
         extra_lora: str = Input(
             description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
             default=None,
         ),
         extra_lora_scale: float = Input(
-            description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
+            description="Determines how strongly the extra LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
             default=1.0,
-            le=5.0,
-            ge=-5,
+            le=3.0,
+            ge=-1,
         ),
     ) -> List[Path]:
         # so you're basically gonna just call the model.
@@ -940,7 +938,7 @@ class HotswapPredictor(BasePredictor):
             height, width = model.preprocess(aspect_ratio, megapixels=megapixels)
 
         model.handle_loras(
-            go_fast, lora_weights, lora_scale, extra_lora, extra_lora_scale
+            go_fast, replicate_weights, lora_scale, extra_lora, extra_lora_scale
         )
 
         if mask and go_fast:

@@ -14,7 +14,7 @@ predict:
         seed: 8888
         output_format: jpg
         go_fast: true
-        lora_weights: fofr/flux-mona-lisa
+        replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
       match_prompt: An image of a woman at a rave with pink hair who looks like the Mona Lisa
 
@@ -27,7 +27,7 @@ predict:
         seed: 8888
         output_format: jpg
         go_fast: true
-        lora_weights: fofr/flux-mona-lisa
+        replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
       match_prompt: An image of a woman at a rave with pink hair who looks like the Mona Lisa
         
@@ -41,7 +41,7 @@ predict:
         seed: 8888
         output_format: jpg
         go_fast: true
-        lora_weights: fofr/flux-mona-lisa
+        replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
       match_prompt: Four images of a woman at a rave with pink hair who looks like the Mona Lisa
 
@@ -55,7 +55,7 @@ predict:
         seed: 8888
         output_format: jpg
         go_fast: true
-        lora_weights: fofr/flux-mona-lisa
+        replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
       match_prompt: Four images of a woman at a rave with pink hair who looks like the Mona Lisa
 
@@ -69,7 +69,7 @@ predict:
         model: dev
         output_format: jpg
         go_fast: false
-        lora_weights: fofr/flux-mona-lisa
+        replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
   
 
@@ -83,7 +83,7 @@ predict:
         model: schnell
         output_format: jpg
         go_fast: false
-        lora_weights: fofr/flux-mona-lisa
+        replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
 
     # no lora! 
@@ -119,7 +119,7 @@ predict:
         seed: 8888
         output_format: jpg
         go_fast: true
-        lora_weights: huggingface.co/multimodalart/flux-tarot-v1
+        replicate_weights: huggingface.co/multimodalart/flux-tarot-v1
         lora_scale: 0.9
     
     # inpainting 
@@ -134,7 +134,7 @@ predict:
         num_inference_steps: 28
         go_fast: True
         megapixels: "1"
-        lora_weights: fofr/flux-80s-cyberpunk
+        replicate_weights: fofr/flux-80s-cyberpunk
         lora_scale: 1.1
 
     # custom height / width
@@ -142,6 +142,7 @@ predict:
         prompt: a photo of MNALSA woman with pink hair at a rave
         height: 768
         width: 768
+        aspect_ratio: custom
         num_outputs: 1
         num_inference_steps: 28
         model: dev
@@ -149,7 +150,7 @@ predict:
         seed: 8888
         output_format: jpg
         go_fast: true
-        lora_weights: fofr/flux-mona-lisa
+        replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
       match_prompt: A 768x768 image of a woman at a rave with pink hair who looks like the Mona Lisa
 
@@ -163,7 +164,7 @@ predict:
         seed: 8888
         output_format: jpg
         go_fast: true
-        lora_weights: fofr/flux-bad-70s-food
+        replicate_weights: fofr/flux-bad-70s-food
         lora_scale: 0.85
         extra_lora_weights: fofr/flux-mona-lisa
         extra_lora_scale: 0.9
