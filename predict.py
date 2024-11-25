@@ -105,8 +105,8 @@ class SharedInputs:
     lora_scale: Input = Input(
         description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
         default=1.0,
-        le=5.0,
-        ge=-5.0,
+        le=3.0,
+        ge=-1.0,
     )
     megapixels: Input = Input(
         description="Approximate number of megapixels for generated image",
@@ -165,7 +165,11 @@ class Predictor(BasePredictor):
         self.falcon_processor = ViTImageProcessor.from_pretrained(FALCON_MODEL_NAME)
 
         # need > 48 GB of ram to store all models in VRAM
-        self.offload = "A40" in gpu_name
+        total_mem = torch.cuda.get_device_properties(0).total_memory
+        self.offload = total_mem < 48 * 1024**3
+        if self.offload:
+            print("GPU memory is:", total_mem / 1024**3, ", offloading models")
+            compile_fp8 = False
 
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
@@ -187,14 +191,33 @@ class Predictor(BasePredictor):
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
         )
 
-        # fp8 only works w/compute capability >= 8.9
-        self.disable_fp8 = disable_fp8 or torch.cuda.get_device_capability() < (8, 9)
         self.vae_scale_factor = 8
+        self.disable_fp8 = disable_fp8
 
         if not self.disable_fp8:
+            if compile_fp8:
+                extra_args = {
+                    "compile_whole_model": True,
+                    "compile_extras": True,
+                    "compile_blocks": True,
+                }
+            else:
+                extra_args = {
+                    "compile_whole_model": False,
+                    "compile_extras": False,
+                    "compile_blocks": False,
+                }
+
+            if self.offload:
+                extra_args |= {
+                    "offload_text_encoder": True,
+                    "offload_vae": True,
+                    "offload_flow": True,
+                }
             self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
                 f"fp8/configs/config-1-{flow_model_name}-h100.json",
                 shared_models=shared_models,
+                **extra_args,
             )
 
             if compile_fp8:
@@ -725,10 +748,11 @@ class SchnellLoraPredictor(Predictor):
         go_fast: bool = SHARED_INPUTS.go_fast,
         lora_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
+        megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
-        width, height = self.preprocess(aspect_ratio)
+        width, height = self.preprocess(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
@@ -784,6 +808,7 @@ class DevLoraPredictor(Predictor):
         go_fast: bool = SHARED_INPUTS.go_fast,
         lora_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
+        megapixels: str = SHARED_INPUTS.megapixels,
     ) -> List[Path]:
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
@@ -791,7 +816,7 @@ class DevLoraPredictor(Predictor):
 
         self.handle_loras(go_fast, lora_weights, lora_scale)
 
-        width, height = self.preprocess(aspect_ratio)
+        width, height = self.preprocess(aspect_ratio, megapixels)
         imgs, np_imgs = self.shared_predict(
             go_fast,
             prompt,
