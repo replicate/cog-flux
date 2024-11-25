@@ -538,11 +538,11 @@ def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0):
     else:
         model.lora_weights = [(lora_weights, lora_scale)]
 
-    if hasattr(model, "f8_clones"):
+    if hasattr(model, "f8_clones") and f8_clones is not None and model.f8_clones is not None:
         # for subsequent lora loads, we only add clones for new modules
         for k in f8_clones.keys():
             if k not in model.f8_clones:
-                model.f8_clones[k] = f8_clones[v]
+                model.f8_clones[k] = f8_clones[k]
 
     else:
         model.f8_clones = f8_clones
