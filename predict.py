@@ -18,7 +18,7 @@ from fp8.util import LoadedModels
 from fp8.lora_loading import load_lora, load_loras, unload_loras
 
 import numpy as np
-from einops import rearrange, repeat
+from einops import rearrange
 from PIL import Image
 from typing import List
 from torchvision import transforms
@@ -285,7 +285,7 @@ class Predictor(BasePredictor):
         )
         img: torch.Tensor = transform(image)
         return img[None, ...]
-    
+
     def get_mask(self, image: str):
         if image is None:
             return None
@@ -310,7 +310,7 @@ class Predictor(BasePredictor):
         lora_weights: str | None = None,
         lora_scale: float = 1.0,
         extra_lora_weights: str | None = None,
-        extra_lora_scale: float = 1.0
+        extra_lora_scale: float = 1.0,
     ):
         if go_fast:
             model = self.fp8_pipe.model
@@ -324,25 +324,33 @@ class Predictor(BasePredictor):
             model = self.flux
             cur_lora = self.bf16_lora
             cur_scale = self.bf16_lora_scale
-            
+
             self.bf16_lora = "loading"
 
         if lora_weights:
             # since we merge weights, need to reload for change in scale. auto-reloading for extra weights
-            if lora_weights != cur_lora or lora_scale != cur_scale or extra_lora_weights:
+            if (
+                lora_weights != cur_lora
+                or lora_scale != cur_scale
+                or extra_lora_weights
+            ):
                 if cur_lora:
                     unload_loras(model)
                 lora_path = self.weights_cache.ensure(lora_weights)
                 if extra_lora_weights:
                     extra_lora_path = self.weights_cache.ensure(extra_lora_weights)
-                    load_loras(model, [lora_path, extra_lora_path], [lora_scale, extra_lora_scale])
+                    load_loras(
+                        model,
+                        [lora_path, extra_lora_path],
+                        [lora_scale, extra_lora_scale],
+                    )
                 else:
                     load_lora(model, lora_path, lora_scale)
             else:
                 print(f"Lora {lora_weights} already loaded")
         elif cur_lora:
             unload_loras(model)
-        
+
         if go_fast:
             self.fp8_lora = lora_weights
             self.fp8_lora_scale = lora_scale
@@ -370,7 +378,7 @@ class Predictor(BasePredictor):
         seed: int = None,
         width: int = 1024,
         height: int = 1024,
-        mask: Path = None, # inpainting for flux-defv
+        mask: Path = None,  # inpainting for flux-defv
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -433,7 +441,7 @@ class Predictor(BasePredictor):
         if self.offload:
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
-        
+
         if mask:
             mask = self.get_mask(mask)
             mask_height = int(height) // self.vae_scale_factor
@@ -442,11 +450,13 @@ class Predictor(BasePredictor):
             mask = mask.to(device=torch_device, dtype=torch.bfloat16)
 
             def pack_img(img):
-                return rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-            
-            inp['noise'] = pack_img(noise)
-            inp['mask'] = pack_img(mask.repeat(1, 16, 1, 1))
-            inp['image_latents'] = pack_img(init_image.to(dtype=torch.bfloat16))
+                return rearrange(
+                    img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2
+                )
+
+            inp["noise"] = pack_img(noise)
+            inp["mask"] = pack_img(mask.repeat(1, 16, 1, 1))
+            inp["image_latents"] = pack_img(init_image.to(dtype=torch.bfloat16))
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
@@ -592,7 +602,7 @@ class Predictor(BasePredictor):
         seed: int = None,
         width: int = 1024,
         height: int = 1024,
-        mask: Path = None # inpainting 
+        mask: Path = None,  # inpainting
     ):
         if go_fast and not self.disable_fp8:
             return self.fp8_predict(
@@ -618,7 +628,7 @@ class Predictor(BasePredictor):
             seed=seed,
             width=width,
             height=height,
-            mask=mask
+            mask=mask,
         )
 
 
@@ -837,7 +847,7 @@ class DevLoraPredictor(Predictor):
             output_quality,
             np_images=np_imgs,
         )
-    
+
 
 class BigPredictor(BasePredictor):
     def setup(self) -> None:
@@ -846,14 +856,15 @@ class BigPredictor(BasePredictor):
 
         # self.schnell_lora.base_setup("flux-schnell", compile_fp8=False)
         # self.schnell_lora.lora_setup()
-        
+
         self.dev_lora = DevLoraPredictor()
         self.dev_lora.setup()
 
         # self.dev_lora.base_setup("flux-dev", compile_fp8=False)
         # self.dev_lora.lora_setup()
 
-    def predict(self,
+    def predict(
+        self,
         prompt: str = SHARED_INPUTS.prompt,
         image: Path = Input(
             description="Input image for image to image mode. The aspect ratio of your output will match this image",
@@ -865,16 +876,16 @@ class BigPredictor(BasePredictor):
         ),
         aspect_ratio: str = Input(
             description="Aspect ratio for the generated image. If custom is selected, uses height and width below & will run in bf16 mode",
-            choices=list(ASPECT_RATIOS.keys()) + ['custom'],
+            choices=list(ASPECT_RATIOS.keys()) + ["custom"],
             default="1:1",
         ),
         height: str = Input(
             description="Height of generated image. Only works if `aspect_ratio` is set to custom. Incompatible with fast generation",
-            default=None
+            default=None,
         ),
         width: str = Input(
             description="Width of generated image. Only works if `aspect_ratio` is set to custom. Incompatible with fast generation",
-            default=None
+            default=None,
         ),
         prompt_strength: float = Input(
             description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
@@ -884,8 +895,8 @@ class BigPredictor(BasePredictor):
         ),
         model: str = Input(
             description="which model do you want to run, dev or schnell?",
-            choices=['dev', 'schnell'],
-            default='dev',
+            choices=["dev", "schnell"],
+            default="dev",
         ),
         num_outputs: int = SHARED_INPUTS.num_outputs,
         num_inference_steps: int = Input(
@@ -913,22 +924,25 @@ class BigPredictor(BasePredictor):
             description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
             default=1.0,
             le=5.0,
-            ge=-5
-        )
-        ) -> List[Path]:
-
+            ge=-5,
+        ),
+    ) -> List[Path]:
         # so you're basically gonna just call the model.
-        model = self.dev_lora if model == 'dev' else self.schnell_lora
+        model = self.dev_lora if model == "dev" else self.schnell_lora
 
-        if aspect_ratio == 'custom':
+        if aspect_ratio == "custom":
             if go_fast:
-                print("Custom aspect ratios not supported with fast fp8 inference; will run in bf16")
+                print(
+                    "Custom aspect ratios not supported with fast fp8 inference; will run in bf16"
+                )
                 go_fast = False
         else:
             height, width = model.preprocess(aspect_ratio, megapixels=megapixels)
-            
-        model.handle_loras(go_fast, lora_weights, lora_scale, extra_lora, extra_lora_scale)
-        
+
+        model.handle_loras(
+            go_fast, lora_weights, lora_scale, extra_lora, extra_lora_scale
+        )
+
         if mask and go_fast:
             print("Inpainting not supported with fast fp8 inference; will run in bf16")
             go_fast = False
@@ -944,7 +958,7 @@ class BigPredictor(BasePredictor):
             seed=seed,
             width=width,
             height=height,
-            mask=mask
+            mask=mask,
         )
 
         return model.postprocess(
@@ -954,6 +968,7 @@ class BigPredictor(BasePredictor):
             output_quality,
             np_images=np_imgs,
         )
+
 
 class TestPredictor(Predictor):
     def setup(self) -> None:
