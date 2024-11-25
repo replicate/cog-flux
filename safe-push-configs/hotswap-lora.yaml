@@ -166,9 +166,9 @@ predict:
         go_fast: true
         replicate_weights: fofr/flux-bad-70s-food
         lora_scale: 0.85
-        extra_lora_weights: fofr/flux-mona-lisa
+        extra_lora: fofr/flux-mona-lisa
         extra_lora_scale: 0.9
-      match_prompt: An image of a woman at a rave with pink hair who looks like the Mona Lisa
+      match_prompt: An image of a woman at a dinner table who looks like the Mona Lisa
 
 
   fuzz:
