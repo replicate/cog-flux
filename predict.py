@@ -290,17 +290,17 @@ class Predictor(BasePredictor):
         if go_fast:
             model = self.fp8_pipe.model
             cur_lora = self.fp8_lora
-            self.fp8_lora = lora_weights
             lora_scale = lora_scale * self.fp8_lora_scale_multiplier
             cur_scale = self.fp8_lora_scale
-            self.fp8_lora_scale = lora_scale
+
+            self.fp8_lora = "loading"
 
         else:
             model = self.flux
             cur_lora = self.bf16_lora
-            self.bf16_lora = lora_weights
             cur_scale = self.bf16_lora_scale
-            self.bf16_lora_scale = lora_scale
+            
+            self.bf16_lora = "loading"
 
         if lora_weights:
             # since we merge weights, need to reload for change in scale.
@@ -313,6 +313,14 @@ class Predictor(BasePredictor):
                 print(f"Lora {lora_weights} already loaded")
         elif cur_lora:
             unload_loras(model)
+        
+        if go_fast:
+            self.fp8_lora = lora_weights
+            self.fp8_lora_scale = lora_scale
+
+        else:
+            self.bf16_lora = lora_weights
+            self.bf16_lora_scale = lora_scale
 
     def preprocess(self, aspect_ratio: str, megapixels: str = "1") -> Tuple[int, int]:
         width, height = ASPECT_RATIOS.get(aspect_ratio)
