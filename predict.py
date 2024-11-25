@@ -814,7 +814,7 @@ class DevLoraPredictor(Predictor):
         )
     
 
-class BigPredictor(BasePredictor):
+class HotswapPredictor(BasePredictor):
     def setup(self) -> None:
         self.schnell_lora = SchnellLoraPredictor()
         self.schnell_lora.setup()

@@ -2,17 +2,15 @@ name: Push Models
 
 on:
   workflow_dispatch:
-    branches: [main]
     inputs:
-      no_push:
-        description: 'Test only, without pushing to prod'
-        type: boolean
-        default: true
+      models:
+        description: 'Comma-separated list of models to push (schnell,dev,schnell-lora,dev-lora,hotswap-lora) or "all"'
+        type: string
+        default: 'all'
 
 jobs:
   cog-safe-push:
     runs-on: ubuntu-latest-4-cores
-    if: github.event.workflow == null  # Only run for the original workflow
 
     steps:
     - uses: actions/checkout@v3
@@ -35,24 +33,26 @@ jobs:
       run: |
         pip install git+https://github.com/replicate/cog-safe-push.git
 
-    - name: Select schnell
-      run: |
-        ./script/select.sh schnell
-
-    - name: Run cog-safe-push on flux-schnell and optionally push to production
+    - name: Push selected models
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
       run: |
-        cog-safe-push -vv ${{ github.event.inputs.no_push == 'true' && '--no-push' || '' }} --config=safe-push-configs/cog-safe-push-schnell.yaml
+        if [ "${{ inputs.models }}" = "all" ]; then
+          models="schnell,dev,schnell-lora,dev-lora,hotswap-lora"
+        else
+          models="${{ inputs.models }}"
+        fi
 
-    - name: Select dev
-      run: |
-        ./script/select.sh dev
-
-    - name: Run cog-safe-push on flux-dev and optionally push to production
-      env:
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
-      run: |
-        cog-safe-push -vv ${{ github.event.inputs.no_push == 'true' && '--no-push' || '' }} --config=safe-push-configs/cog-safe-push-dev.yaml
+        for model in ${models//,/ }; do
+          echo "==="
+          echo "==="
+          echo "=== Pushing $model"
+          echo "==="
+          echo "==="
+          ./script/select.sh $model
+          cog-safe-push -vv
+          if [ "$model" != "hotswap-lora" ]; then
+            cog push r8.im/black-forest-labs/flux-$model  # to get openapi schema :..(
+          fi
+        done
