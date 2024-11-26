@@ -947,7 +947,9 @@ class HotswapPredictor(BasePredictor):
         )
 
         if image and go_fast:
-            print("Img2img and inpainting not supported with fast fp8 inference; will run in bf16")
+            print(
+                "Img2img and inpainting not supported with fast fp8 inference; will run in bf16"
+            )
             go_fast = False
 
         imgs, np_imgs = model.shared_predict(
