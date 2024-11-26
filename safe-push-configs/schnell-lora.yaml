@@ -89,6 +89,6 @@ predict:
 
   fuzz:
     fixed_inputs:
-      replicate_weights:  huggingface.co/multimodalart/flux-tarot-v1
+      lora_weights:  huggingface.co/multimodalart/flux-tarot-v1
     duration: 120
     iterations: 10

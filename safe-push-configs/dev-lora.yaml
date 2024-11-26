@@ -98,6 +98,6 @@ predict:
 
   fuzz:
     fixed_inputs:
-      replicate_weights: fofr/flux-90s-power-rangers
+      lora_weights: fofr/flux-90s-power-rangers
     duration: 120
     iterations: 10
