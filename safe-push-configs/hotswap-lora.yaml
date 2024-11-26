@@ -117,6 +117,7 @@ predict:
         num_inference_steps: 28
         guidance_scale: 2.5
         seed: 8888
+        model: dev
         output_format: jpg
         go_fast: true
         replicate_weights: huggingface.co/multimodalart/flux-tarot-v1
