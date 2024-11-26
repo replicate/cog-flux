@@ -14,7 +14,7 @@ predict:
         go_fast: true
         lora_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
-      match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_flux-mona-lisa_go_fast.jpg
+   #   match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_flux-mona-lisa_go_fast.jpg
 
     # monalisa ~= 4 persons
     - inputs:
@@ -39,7 +39,7 @@ predict:
         go_fast: false
         lora_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
-      match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_flux-mona-lisa_go_slow.jpg
+    #  match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_flux-mona-lisa_go_slow.jpg
 
     # no lora! 
     - inputs:
@@ -50,7 +50,7 @@ predict:
         output_format: jpg
         go_fast: true
         lora_scale: 0.9
-      match_prompt: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_no-lora_go_fast.jpg
+    #  match_prompt: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_no-lora_go_fast.jpg
 
     # aesthetic lora
     - inputs:
@@ -62,7 +62,7 @@ predict:
         output_format: jpg
         go_fast: true
         lora_scale: 0.9
-      match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_flux-softserve-anime_go_fast.jpg
+    #  match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_flux-softserve-anime_go_fast.jpg
 
     # non-replicate weights
     - inputs:
@@ -74,7 +74,7 @@ predict:
         go_fast: true
         lora_weights: huggingface.co/multimodalart/flux-tarot-v1
         lora_scale: 0.9
-      match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_flux-tarot-v1_go_fast.jpg
+    #  match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/schnell_flux-tarot-v1_go_fast.jpg
 
     # non-replicate weights kohya
     - inputs:
