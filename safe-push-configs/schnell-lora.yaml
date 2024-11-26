@@ -83,7 +83,7 @@ predict:
         guidance_scale: 2.5
         output_format: jpg
         go_fast: true
-        lora_weights: huggingface.co/Purz/choose-your-own-adventure/resolve/main/purz-cy04-choose_your_own_adventure.safetensors
+        lora_weights: huggingface.co/Purz/choose-your-own-adventure
         lora_scale: 0.9
       match_prompt: A drawing of a man thinking about an oven
 
