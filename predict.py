@@ -940,7 +940,7 @@ class HotswapPredictor(BasePredictor):
                 )
                 go_fast = False
         else:
-            height, width = model.preprocess(aspect_ratio, megapixels=megapixels)
+            width, height = model.preprocess(aspect_ratio, megapixels=megapixels)
 
         model.handle_loras(
             go_fast, replicate_weights, lora_scale, extra_lora, extra_lora_scale
