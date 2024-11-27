@@ -3,6 +3,7 @@ import time
 from typing import Any, Tuple, Optional
 
 import torch
+import torch._dynamo as dynamo
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -136,6 +137,7 @@ class Predictor(BasePredictor):
         compile_fp8: bool = False,
         compile_bf16: bool = False,
         disable_fp8: bool = False,
+        compile_ae: bool = False,
     ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
@@ -223,8 +225,61 @@ class Predictor(BasePredictor):
             if compile_fp8:
                 self.compile_fp8()
 
+        if compile_ae:
+            self.compile_ae()
+
         if compile_bf16:
             self.compile_bf16()
+
+    @torch.inference_mode()
+    def compile_ae(self):
+        # helpful: export TORCH_COMPILE_DEBUG=1 TORCH_LOGS=dynamic,dynamo
+
+        # the order is important:
+        # torch.compile has to recompile if it makes invalid assumptions
+        # about the input sizes. Having higher input sizes first makes
+        # for fewer recompiles.
+        vae_sizes = [
+            [1, 16, 192, 168],
+            [1, 16, 96, 96],
+            [1, 16, 96, 168],
+            [1, 16, 128, 128],
+            [1, 16, 96, 168],
+            [1, 16, 80, 192],
+            [1, 16, 104, 152],
+            [1, 16, 152, 104],
+            [1, 16, 136, 112],
+            [1, 16, 112, 136],
+            [1, 16, 144, 112],
+            [1, 16, 112, 144],
+            [1, 16, 168, 96],
+            [1, 16, 192, 80],
+            [4, 16, 128, 128],
+        ]
+        print("compiling AE")
+        st = time.time()
+        device = torch.device("cuda")
+        if self.offload:
+            self.ae.decoder.to(device)
+
+        self.ae.decoder = torch.compile(self.ae.decoder)
+
+        # actual compilation happens when you give it inputs
+        for f in vae_sizes:
+            print("Compiling AE for size", f)
+            x = torch.rand(f, device=device)
+            dynamo.mark_dynamic(x, 0, min=1, max=4)
+            dynamo.mark_dynamic(x, 2, min=80)
+            dynamo.mark_dynamic(x, 3, min=80)
+            with torch.autocast(
+                device_type=device.type, dtype=torch.bfloat16, cache_enabled=False
+            ):
+                self.ae.decode(x)
+
+        if self.offload:
+            self.ae.decoder.cpu()
+            torch.cuda.empty_cache()
+        print("compiled AE in ", time.time() - st)
 
     def compile_fp8(self):
         print("compiling fp8 model")
@@ -634,7 +689,7 @@ class Predictor(BasePredictor):
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-schnell", compile_fp8=True)
+        self.base_setup("flux-schnell", compile_fp8=True, compile_ae=True)
 
     def predict(
         self,
@@ -676,7 +731,7 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-dev", compile_fp8=True)
+        self.base_setup("flux-dev", compile_fp8=True, compile_ae=True)
 
     def predict(
         self,
