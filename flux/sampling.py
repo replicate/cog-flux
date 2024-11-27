@@ -124,7 +124,6 @@ def denoise_single_item(
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
-        
         pred = model(
             img=img,
             img_ids=img_ids,
@@ -178,7 +177,7 @@ def denoise(
             compile_run,
             image_latents,
             mask,
-            noise
+            noise[i]
         )
         compile_run = False
         output_imgs.append(denoised_img)
