@@ -94,10 +94,6 @@ class SharedInputs:
         description="Disable safety checker for generated images.",
         default=False,
     )
-    go_fast: Input = Input(
-        description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
-        default=True,
-    )
     lora_weights: Input = Input(
         description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
         default=None,
@@ -113,6 +109,17 @@ class SharedInputs:
         choices=["1", "0.25"],
         default="1",
     )
+
+    @property
+    def go_fast(self) -> Input:
+        return self.go_fast_with_default(True)
+
+    @staticmethod
+    def go_fast_with_default(default: bool) -> Input:
+        return Input(
+            description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
+            default=default,
+        )
 
 
 SHARED_INPUTS = SharedInputs()
@@ -136,6 +143,9 @@ class Predictor(BasePredictor):
         compile_fp8: bool = False,
         compile_bf16: bool = False,
         disable_fp8: bool = False,
+        t5=None,
+        clip=None,
+        ae=None,
     ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
@@ -173,15 +183,24 @@ class Predictor(BasePredictor):
 
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
-        self.t5 = load_t5(device, max_length=max_length)
-        self.clip = load_clip(device)
+        if t5:
+            self.t5 = t5
+        else:
+            self.t5 = load_t5(device, max_length=max_length)
+        if clip:
+            self.clip = clip
+        else:
+            self.clip = load_clip(device)
         self.flux = load_flow_model(
             self.flow_model_name, device="cpu" if self.offload else device
         )
         self.flux = self.flux.eval()
-        self.ae = load_ae(
-            self.flow_model_name, device="cpu" if self.offload else device
-        )
+        if ae:
+            self.ae = ae
+        else:
+            self.ae = load_ae(
+                self.flow_model_name, device="cpu" if self.offload else device
+            )
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
@@ -783,8 +802,8 @@ class SchnellLoraPredictor(Predictor):
 
 
 class DevLoraPredictor(Predictor):
-    def setup(self) -> None:
-        self.base_setup("flux-dev", compile_fp8=True)
+    def setup(self, t5=None, clip=None, ae=None) -> None:
+        self.base_setup("flux-dev", compile_fp8=True, t5=t5, clip=clip, ae=ae)
         self.lora_setup()
 
     def predict(
@@ -855,7 +874,11 @@ class HotswapPredictor(BasePredictor):
         self.schnell_lora.setup()
 
         self.dev_lora = DevLoraPredictor()
-        self.dev_lora.setup()
+        self.dev_lora.setup(
+            t5=self.schnell_lora.t5,
+            clip=self.schnell_lora.clip,
+            ae=self.schnell_lora.ae,
+        )
 
     def predict(
         self,
@@ -915,7 +938,7 @@ class HotswapPredictor(BasePredictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        go_fast: bool = SHARED_INPUTS.go_fast,
+        go_fast: bool = SHARED_INPUTS.go_fast_with_default(False),
         megapixels: str = SHARED_INPUTS.megapixels,
         replicate_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
