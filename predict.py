@@ -143,6 +143,9 @@ class Predictor(BasePredictor):
         compile_fp8: bool = False,
         compile_bf16: bool = False,
         disable_fp8: bool = False,
+        t5=None,
+        clip=None,
+        ae=None,
     ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
@@ -180,15 +183,24 @@ class Predictor(BasePredictor):
 
         device = "cuda"
         max_length = 256 if self.flow_model_name == "flux-schnell" else 512
-        self.t5 = load_t5(device, max_length=max_length)
-        self.clip = load_clip(device)
+        if t5:
+            self.t5 = t5
+        else:
+            self.t5 = load_t5(device, max_length=max_length)
+        if clip:
+            self.clip = clip
+        else:
+            self.clip = load_clip(device)
         self.flux = load_flow_model(
             self.flow_model_name, device="cpu" if self.offload else device
         )
         self.flux = self.flux.eval()
-        self.ae = load_ae(
-            self.flow_model_name, device="cpu" if self.offload else device
-        )
+        if ae:
+            self.ae = ae
+        else:
+            self.ae = load_ae(
+                self.flow_model_name, device="cpu" if self.offload else device
+            )
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
@@ -790,8 +802,8 @@ class SchnellLoraPredictor(Predictor):
 
 
 class DevLoraPredictor(Predictor):
-    def setup(self) -> None:
-        self.base_setup("flux-dev", compile_fp8=True)
+    def setup(self, t5=None, clip=None, ae=None) -> None:
+        self.base_setup("flux-dev", compile_fp8=True, t5=t5, clip=clip, ae=ae)
         self.lora_setup()
 
     def predict(
@@ -862,7 +874,11 @@ class HotswapPredictor(BasePredictor):
         self.schnell_lora.setup()
 
         self.dev_lora = DevLoraPredictor()
-        self.dev_lora.setup()
+        self.dev_lora.setup(
+            t5=self.schnell_lora.t5,
+            clip=self.schnell_lora.clip,
+            ae=self.schnell_lora.ae,
+        )
 
     def predict(
         self,
