@@ -94,10 +94,6 @@ class SharedInputs:
         description="Disable safety checker for generated images.",
         default=False,
     )
-    go_fast: Input = Input(
-        description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
-        default=True,
-    )
     lora_weights: Input = Input(
         description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
         default=None,
@@ -113,6 +109,17 @@ class SharedInputs:
         choices=["1", "0.25"],
         default="1",
     )
+
+    @property
+    def go_fast(self) -> Input:
+        return self.go_fast_with_default(True)
+
+    @staticmethod
+    def go_fast_with_default(default: bool) -> Input:
+        return Input(
+            description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
+            default=default,
+        )
 
 
 SHARED_INPUTS = SharedInputs()
@@ -915,7 +922,7 @@ class HotswapPredictor(BasePredictor):
         output_format: str = SHARED_INPUTS.output_format,
         output_quality: int = SHARED_INPUTS.output_quality,
         disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        go_fast: bool = SHARED_INPUTS.go_fast,
+        go_fast: bool = SHARED_INPUTS.go_fast_with_default(False),
         megapixels: str = SHARED_INPUTS.megapixels,
         replicate_weights: str = SHARED_INPUTS.lora_weights,
         lora_scale: float = SHARED_INPUTS.lora_scale,
