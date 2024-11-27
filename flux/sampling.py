@@ -177,11 +177,11 @@ def denoise(
             compile_run,
             image_latents,
             mask,
-            noise[i]
+            None if noise is None else noise[i]
         )
         compile_run = False
         output_imgs.append(denoised_img)
-    
+
     return torch.cat(output_imgs), model
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
