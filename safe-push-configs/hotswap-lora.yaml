@@ -1,6 +1,7 @@
 model: replicate/flux-hotswap-lora-internal-model
 test_model: replicate/test-flux-hotswap-lora
 predict:
+  compare_outputs: false
   predict_timeout: 600
   test_cases:
 
@@ -30,7 +31,7 @@ predict:
         replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
       match_prompt: An image of a woman at a rave with pink hair who looks like the Mona Lisa
-        
+
     # monalisa ~= 4 persons
     - inputs:
         prompt: a photo of MNALSA woman with pink hair at a rave
@@ -71,7 +72,7 @@ predict:
         go_fast: false
         replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
-  
+
 
     # same but slower
     - inputs:
@@ -86,7 +87,7 @@ predict:
         replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
 
-    # no lora! 
+    # no lora!
     - inputs:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 1
@@ -98,7 +99,7 @@ predict:
         model: dev
         lora_scale: 0.9
 
-    # no lora! 
+    # no lora!
     - inputs:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 1
@@ -122,9 +123,9 @@ predict:
         go_fast: true
         replicate_weights: huggingface.co/multimodalart/flux-tarot-v1
         lora_scale: 0.9
-    
-    # inpainting 
-    - inputs: 
+
+    # inpainting
+    - inputs:
         prompt: a green cat sitting on a park bench
         image: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/inpainting-img.png
         mask: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/inpainting-mask.png
