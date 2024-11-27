@@ -15,7 +15,7 @@ from attr import dataclass
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 from fp8.flux_pipeline import FluxPipeline
 from fp8.util import LoadedModels
-from fp8.lora_loading import load_lora, unload_loras
+from fp8.lora_loading import load_lora, load_loras, unload_loras
 
 import numpy as np
 from einops import rearrange
@@ -35,13 +35,13 @@ from transformers import (
 )
 from weights import WeightsDownloadCache
 
-SAFETY_CACHE = Path("/src/safety-cache")
-FEATURE_EXTRACTOR = Path("/src/feature-extractor")
+SAFETY_CACHE = Path("./safety-cache")
+FEATURE_EXTRACTOR = Path("./feature-extractor")
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
 MAX_IMAGE_SIZE = 1440
 
 FALCON_MODEL_NAME = "Falconsai/nsfw_image_detection"
-FALCON_MODEL_CACHE = Path("/src/falcon-cache")
+FALCON_MODEL_CACHE = Path("./falcon-cache")
 FALCON_MODEL_URL = (
     "https://weights.replicate.delivery/default/falconai/nsfw-image-detection.tar"
 )
@@ -191,6 +191,7 @@ class Predictor(BasePredictor):
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
         )
 
+        self.vae_scale_factor = 8
         self.disable_fp8 = disable_fp8
 
         if not self.disable_fp8:
@@ -285,6 +286,20 @@ class Predictor(BasePredictor):
         img: torch.Tensor = transform(image)
         return img[None, ...]
 
+    def get_mask(self, image: str):
+        if image is None:
+            return None
+        image = Image.open(image).convert("L")
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+            ]
+        )
+        img: torch.Tensor = transform(image)
+        img[img < 0.5] = 0
+        img[img > 0.5] = 1
+        return img[None, ...]
+
     def predict():
         raise Exception("You need to instantiate a predictor for a specific flux model")
 
@@ -294,33 +309,55 @@ class Predictor(BasePredictor):
         go_fast: bool,
         lora_weights: str | None = None,
         lora_scale: float = 1.0,
+        extra_lora_weights: str | None = None,
+        extra_lora_scale: float = 1.0,
     ):
         if go_fast:
             model = self.fp8_pipe.model
             cur_lora = self.fp8_lora
-            self.fp8_lora = lora_weights
             lora_scale = lora_scale * self.fp8_lora_scale_multiplier
             cur_scale = self.fp8_lora_scale
-            self.fp8_lora_scale = lora_scale
+
+            self.fp8_lora = "loading"
 
         else:
             model = self.flux
             cur_lora = self.bf16_lora
-            self.bf16_lora = lora_weights
             cur_scale = self.bf16_lora_scale
-            self.bf16_lora_scale = lora_scale
+
+            self.bf16_lora = "loading"
 
         if lora_weights:
-            # since we merge weights, need to reload for change in scale.
-            if lora_weights != cur_lora or lora_scale != cur_scale:
+            # since we merge weights, need to reload for change in scale. auto-reloading for extra weights
+            if (
+                lora_weights != cur_lora
+                or lora_scale != cur_scale
+                or extra_lora_weights
+            ):
                 if cur_lora:
                     unload_loras(model)
                 lora_path = self.weights_cache.ensure(lora_weights)
-                load_lora(model, lora_path, lora_scale)
+                if extra_lora_weights:
+                    extra_lora_path = self.weights_cache.ensure(extra_lora_weights)
+                    load_loras(
+                        model,
+                        [lora_path, extra_lora_path],
+                        [lora_scale, extra_lora_scale],
+                    )
+                else:
+                    load_lora(model, lora_path, lora_scale)
             else:
                 print(f"Lora {lora_weights} already loaded")
         elif cur_lora:
             unload_loras(model)
+
+        if go_fast:
+            self.fp8_lora = lora_weights
+            self.fp8_lora_scale = lora_scale
+
+        else:
+            self.bf16_lora = lora_weights
+            self.bf16_lora_scale = lora_scale
 
     def preprocess(self, aspect_ratio: str, megapixels: str = "1") -> Tuple[int, int]:
         width, height = ASPECT_RATIOS.get(aspect_ratio)
@@ -341,6 +378,7 @@ class Predictor(BasePredictor):
         seed: int = None,
         width: int = 1024,
         height: int = 1024,
+        mask: Path = None,  # inpainting for flux-defv
     ) -> List[Path]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
@@ -389,6 +427,7 @@ class Predictor(BasePredictor):
             dtype=torch.bfloat16,
             seed=seed,
         )
+        noise = x
         timesteps = get_schedule(
             num_inference_steps, (x.shape[-1] * x.shape[-2]) // 4, shift=self.shift
         )
@@ -402,6 +441,22 @@ class Predictor(BasePredictor):
         if self.offload:
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
         inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=[prompt] * num_outputs)
+
+        if mask:
+            mask = self.get_mask(mask)
+            mask_height = int(height) // self.vae_scale_factor
+            mask_width = int(width) // self.vae_scale_factor
+            mask = torch.nn.functional.interpolate(mask, size=(mask_height, mask_width))
+            mask = mask.to(device=torch_device, dtype=torch.bfloat16)
+
+            def pack_img(img):
+                return rearrange(
+                    img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2
+                )
+
+            inp["noise"] = pack_img(noise)
+            inp["mask"] = pack_img(mask.repeat(1, 16, 1, 1))
+            inp["image_latents"] = pack_img(init_image.to(dtype=torch.bfloat16))
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
@@ -547,6 +602,7 @@ class Predictor(BasePredictor):
         seed: int = None,
         width: int = 1024,
         height: int = 1024,
+        mask: Path = None,  # inpainting
     ):
         if go_fast and not self.disable_fp8:
             return self.fp8_predict(
@@ -572,6 +628,7 @@ class Predictor(BasePredictor):
             seed=seed,
             width=width,
             height=height,
+            mask=mask,
         )
 
 
@@ -784,6 +841,132 @@ class DevLoraPredictor(Predictor):
         )
 
         return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+class HotswapPredictor(BasePredictor):
+    def setup(self) -> None:
+        self.schnell_lora = SchnellLoraPredictor()
+        self.schnell_lora.setup()
+
+        self.dev_lora = DevLoraPredictor()
+        self.dev_lora.setup()
+
+    def predict(
+        self,
+        prompt: str = Input(
+            description="Prompt for generated image. If you include the `trigger_word` used in the training process you are more likely to activate the trained object, style, or concept in the resulting image."
+        ),
+        image: Path = Input(
+            description="Input image for image to image or inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored.",
+            default=None,
+        ),
+        mask: Path = Input(
+            description="Image mask for image inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored.",
+            default=None,
+        ),
+        aspect_ratio: str = Input(
+            description="Aspect ratio for the generated image. If custom is selected, uses height and width below & will run in bf16 mode",
+            choices=list(ASPECT_RATIOS.keys()) + ["custom"],
+            default="1:1",
+        ),
+        height: int = Input(
+            description="Height of generated image. Only works if `aspect_ratio` is set to custom. Will be rounded to nearest multiple of 16. Incompatible with fast generation",
+            ge=256,
+            le=1440,
+            default=None,
+        ),
+        width: int = Input(
+            description="Width of generated image. Only works if `aspect_ratio` is set to custom. Will be rounded to nearest multiple of 16. Incompatible with fast generation",
+            ge=256,
+            le=1440,
+            default=None,
+        ),
+        prompt_strength: float = Input(
+            description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            ge=0.0,
+            le=1.0,
+            default=0.80,
+        ),
+        model: str = Input(
+            description="Which model to run inference with. The dev model performs best with around 28 inference steps but the schnell model only needs 4 steps.",
+            choices=["dev", "schnell"],
+            default="dev",
+        ),
+        num_outputs: int = SHARED_INPUTS.num_outputs,
+        num_inference_steps: int = Input(
+            description="Number of denoising steps. More steps can give more detailed images, but take longer.",
+            ge=1,
+            le=50,
+            default=28,
+        ),
+        guidance_scale: float = Input(
+            description="Guidance scale for the diffusion process. Lower values can give more realistic images. Good values to try are 2, 2.5, 3 and 3.5",
+            ge=0,
+            le=10,
+            default=3,
+        ),
+        seed: int = SHARED_INPUTS.seed,
+        output_format: str = SHARED_INPUTS.output_format,
+        output_quality: int = SHARED_INPUTS.output_quality,
+        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
+        go_fast: bool = SHARED_INPUTS.go_fast,
+        megapixels: str = SHARED_INPUTS.megapixels,
+        replicate_weights: str = SHARED_INPUTS.lora_weights,
+        lora_scale: float = SHARED_INPUTS.lora_scale,
+        extra_lora: str = Input(
+            description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
+            default=None,
+        ),
+        extra_lora_scale: float = Input(
+            description="Determines how strongly the extra LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
+            default=1.0,
+            le=3.0,
+            ge=-1,
+        ),
+    ) -> List[Path]:
+        # so you're basically gonna just call the model.
+        model = self.dev_lora if model == "dev" else self.schnell_lora
+
+        if aspect_ratio == "custom":
+            if go_fast:
+                print(
+                    "Custom aspect ratios not supported with fast fp8 inference; will run in bf16"
+                )
+                go_fast = False
+        else:
+            width, height = model.preprocess(aspect_ratio, megapixels=megapixels)
+
+        model.handle_loras(
+            go_fast, replicate_weights, lora_scale, extra_lora, extra_lora_scale
+        )
+
+        if image and go_fast:
+            print(
+                "Img2img and inpainting not supported with fast fp8 inference; will run in bf16"
+            )
+            go_fast = False
+
+        imgs, np_imgs = model.shared_predict(
+            go_fast,
+            prompt,
+            num_outputs,
+            num_inference_steps,
+            guidance=guidance_scale,
+            image=image,
+            prompt_strength=prompt_strength,
+            seed=seed,
+            width=width,
+            height=height,
+            mask=mask,
+        )
+
+        return model.postprocess(
             imgs,
             disable_safety_checker,
             output_format,

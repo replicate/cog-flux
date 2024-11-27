@@ -1,0 +1,181 @@
+model: replicate/flux-hotswap-lora-internal-model
+test_model: replicate/test-flux-hotswap-lora
+predict:
+  predict_timeout: 600
+  test_cases:
+
+    # monalisa ~= a person
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 28
+        model: dev
+        guidance_scale: 2.5
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        replicate_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+      match_prompt: An image of a woman at a rave with pink hair who looks like the Mona Lisa
+
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 4
+        model: schnell
+        guidance_scale: 2.5
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        replicate_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+      match_prompt: An image of a woman at a rave with pink hair who looks like the Mona Lisa
+        
+    # monalisa ~= 4 persons
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 4
+        num_inference_steps: 4
+        model: schnell
+        guidance_scale: 2.5
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        replicate_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+      match_prompt: Four images of a woman at a rave with pink hair who looks like the Mona Lisa
+
+    # monalisa ~= 4 persons
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 4
+        num_inference_steps: 28
+        model: dev
+        guidance_scale: 2.5
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        replicate_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+      match_prompt: Four images of a woman at a rave with pink hair who looks like the Mona Lisa
+
+    # same but slower
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 28
+        guidance_scale: 2.5
+        seed: 8888
+        model: dev
+        output_format: jpg
+        go_fast: false
+        replicate_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+  
+
+    # same but slower
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 4
+        guidance_scale: 2.5
+        seed: 8888
+        model: schnell
+        output_format: jpg
+        go_fast: false
+        replicate_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+
+    # no lora! 
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 28
+        guidance_scale: 2.5
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        model: dev
+        lora_scale: 0.9
+
+    # no lora! 
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 4
+        guidance_scale: 2.5
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        model: schnell
+        lora_scale: 0.9
+
+    # non-replicate weights
+    - inputs:
+        prompt: a coca cola can "sacred elixir" arcana in the style of TOK a trtcrd, tarot style
+        num_outputs: 1
+        num_inference_steps: 28
+        guidance_scale: 2.5
+        seed: 8888
+        model: dev
+        output_format: jpg
+        go_fast: true
+        replicate_weights: huggingface.co/multimodalart/flux-tarot-v1
+        lora_scale: 0.9
+    
+    # inpainting 
+    - inputs: 
+        prompt: a green cat sitting on a park bench
+        image: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/inpainting-img.png
+        mask: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/inpainting-mask.png
+        aspect_ratio: "1:1"
+        prompt_strength: 1.0
+        model: dev
+        num_outputs: 1
+        num_inference_steps: 28
+        go_fast: True
+        megapixels: "1"
+        replicate_weights: fofr/flux-80s-cyberpunk
+        lora_scale: 1.1
+
+    # custom height / width
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        height: 768
+        width: 768
+        aspect_ratio: custom
+        num_outputs: 1
+        num_inference_steps: 28
+        model: dev
+        guidance_scale: 2.5
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        replicate_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+      match_prompt: A 768x768 image of a woman at a rave with pink hair who looks like the Mona Lisa
+
+    # multi-lora
+    - inputs:
+        prompt: A portrait photo of MNALSA woman sitting at a party table with a selection of bad 70s food
+        num_outputs: 1
+        num_inference_steps: 28
+        model: dev
+        guidance_scale: 2.5
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        replicate_weights: fofr/flux-bad-70s-food
+        lora_scale: 0.85
+        extra_lora: fofr/flux-mona-lisa
+        extra_lora_scale: 0.9
+      match_prompt: An image of a woman at a dinner table who looks like the Mona Lisa
+
+
+  fuzz:
+    fixed_inputs:
+      replicate_weights: fofr/flux-90s-power-rangers
+    disabled_inputs:
+      - extra_lora
+    duration: 120
+    iterations: 10

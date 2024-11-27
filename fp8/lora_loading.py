@@ -489,11 +489,7 @@ def apply_lora_weight_to_module(
     fused_weight = (w_orig.float() + fused_lora).to(torch.bfloat16)
     return fused_weight  
 
-
-@torch.inference_mode()
-def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0):
-    t = time.time()
-    has_guidance = model.params.guidance_embed
+def convert_lora_weights(lora_path: str | Path, has_guidance: bool):
     logger.info(f"Loading LoRA weights for {lora_path}")
     lora_weights = load_file(lora_path, device="cuda")
     is_kohya = any(".lora_down.weight" in k for k in lora_weights)
@@ -516,14 +512,40 @@ def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0):
     else:
         lora_weights = convert_from_original_flux_checkpoint(lora_weights)
     logger.info("LoRA weights loaded")
+    return lora_weights
 
-    model.f8_clones = apply_lora_to_model(model, lora_weights, lora_scale)
+
+@torch.inference_mode()
+def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: list[float]):
+    t = time.time()
+    for lora, scale in zip(lora_paths, lora_scales):
+        load_lora(model, lora, scale) 
+
+
+@torch.inference_mode()
+def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0):
+    t = time.time()
+    has_guidance = model.params.guidance_embed
+
+    lora_weights = convert_lora_weights(lora_path, has_guidance)
+
+    f8_clones = apply_lora_to_model(model, lora_weights, lora_scale)
+
     logger.success(f"LoRA applied in {time.time() - t:.2}s")
 
     if hasattr(model, "lora_weights"):
         model.lora_weights.append((lora_weights, lora_scale))
     else:
         model.lora_weights = [(lora_weights, lora_scale)]
+
+    if hasattr(model, "f8_clones") and f8_clones is not None and model.f8_clones is not None:
+        # for subsequent lora loads, we only add clones for new modules
+        for k in f8_clones.keys():
+            if k not in model.f8_clones:
+                model.f8_clones[k] = f8_clones[k]
+
+    else:
+        model.f8_clones = f8_clones
 
 
 @torch.inference_mode()
