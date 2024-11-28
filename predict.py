@@ -868,8 +868,12 @@ class DevLoraPredictor(Predictor):
         )
 
 
+MAX_HOTSWAP_LIFETIME_SECONDS = 60 * 60 * 2
+
+
 class HotswapPredictor(BasePredictor):
     def setup(self) -> None:
+        self._boot_time = time.time()
         self.schnell_lora = SchnellLoraPredictor()
         self.schnell_lora.setup()
 
@@ -953,6 +957,11 @@ class HotswapPredictor(BasePredictor):
             ge=-1,
         ),
     ) -> List[Path]:
+        if time.time() - self._boot_time > MAX_HOTSWAP_LIFETIME_SECONDS:
+            raise RuntimeError(
+                f"hotswap has been running more than {MAX_HOTSWAP_LIFETIME_SECONDS} seconds"
+            )
+
         # so you're basically gonna just call the model.
         model = self.dev_lora if model == "dev" else self.schnell_lora
 
