@@ -344,23 +344,15 @@ class Predictor(BasePredictor):
     def aspect_ratio_to_width_height(self, aspect_ratio: str) -> tuple[int, int]:
         return ASPECT_RATIOS[aspect_ratio]
 
-    def get_image(self, image: str):
-        if image is None:
-            return None
-        image = Image.open(image).convert("RGB")
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Lambda(lambda x: 2.0 * x - 1.0),
-            ]
-        )
-        img: torch.Tensor = transform(image)
-        return img[None, ...]
-
-    def get_mask(self, image: str):
-        if image is None:
-            return None
-        image = Image.open(image).convert("L")
+    def prepare_legacy_mask(
+        self,
+        mask_path: Path,
+        init_image: Tensor,
+        noise: Tensor,
+        width: int,
+        height: int,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        image = Image.open(mask_path).convert("L")
         transform = transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -369,7 +361,21 @@ class Predictor(BasePredictor):
         img: torch.Tensor = transform(image)
         img[img < 0.5] = 0
         img[img > 0.5] = 1
-        return img[None, ...]
+        mask = img[None, ...]
+
+        mask_height = int(height) // self.vae_scale_factor
+        mask_width = int(width) // self.vae_scale_factor
+        mask = torch.nn.functional.interpolate(mask, size=(mask_height, mask_width))
+        mask = mask.to(device=torch.device("cuda"), dtype=torch.bfloat16)
+
+        def pack_img(img):
+            return rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
+
+        mask = pack_img(mask.repeat(1, 16, 1, 1))
+        noise = pack_img(noise)
+        image_latents = pack_img(init_image.to(dtype=torch.bfloat16))
+
+        return mask, noise, image_latents
 
     # TODO(andreas): make this an abstract class
     def predict(self):
@@ -458,7 +464,7 @@ class Predictor(BasePredictor):
         seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
-        mask: Path = None,  # inpainting for flux-defv
+        legacy_mask_path: Path = None,  # inpainting for hotswap
         control_image_embedder: ImageEncoder | None = None,
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """Run a single prediction on the model"""
@@ -484,7 +490,7 @@ class Predictor(BasePredictor):
                 height=height,
             )
 
-        # img2img only works for flux-dev
+        # img2img
         elif image_path is not None:
             # For backwards compatibility, we still preserve width and
             # height for init_images, as opposed to using megapixels
@@ -500,7 +506,6 @@ class Predictor(BasePredictor):
             dtype=torch.bfloat16,
             seed=seed,
         )
-        noise = x
         timesteps = get_schedule(
             num_inference_steps,
             # TODO: this has changed in upstream flux to x.shape[1]
@@ -523,21 +528,15 @@ class Predictor(BasePredictor):
         if img_cond is not None:
             inp["img_cond"] = img_cond
 
-        if mask:
-            mask = self.get_mask(mask)
-            mask_height = int(height) // self.vae_scale_factor
-            mask_width = int(width) // self.vae_scale_factor
-            mask = torch.nn.functional.interpolate(mask, size=(mask_height, mask_width))
-            mask = mask.to(device=torch_device, dtype=torch.bfloat16)
-
-            def pack_img(img):
-                return rearrange(
-                    img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2
-                )
-
-            inp["noise"] = pack_img(noise)
-            inp["mask"] = pack_img(mask.repeat(1, 16, 1, 1))
-            inp["image_latents"] = pack_img(init_image.to(dtype=torch.bfloat16))
+        if legacy_mask_path:
+            assert init_image is not None, "Init image is not set when mask is set"
+            inp["mask"], inp["noise"], inp["image_latents"] = self.prepare_legacy_mask(
+                mask_path=legacy_mask_path,
+                init_image=init_image,
+                noise=x,
+                width=width,
+                height=height,
+            )
 
         if self.offload:
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
@@ -682,6 +681,7 @@ class Predictor(BasePredictor):
         width: int = 1024,
         height: int = 1024,
         control_image_embedder: ImageEncoder | None = None,
+        legacy_mask_path: Path | None = None,
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         if go_fast and not self.disable_fp8:
             assert image is None
@@ -711,7 +711,7 @@ class Predictor(BasePredictor):
             seed=seed,
             width=width,
             height=height,
-            mask=mask,
+            legacy_mask_path=legacy_mask_path,
             control_image_embedder=control_image_embedder,
         )
 
@@ -1258,7 +1258,7 @@ class HotswapPredictor(BasePredictor):
             choices=["dev", "schnell"],
             default="dev",
         ),
-        num_outputs: int = SHARED_INPUTS.num_outputs,
+        num_outputs: int = Inputs.num_outputs,
         num_inference_steps: int = Input(
             description="Number of denoising steps. More steps can give more detailed images, but take longer.",
             ge=1,
@@ -1271,14 +1271,14 @@ class HotswapPredictor(BasePredictor):
             le=10,
             default=3,
         ),
-        seed: int = SHARED_INPUTS.seed,
-        output_format: str = SHARED_INPUTS.output_format,
-        output_quality: int = SHARED_INPUTS.output_quality,
-        disable_safety_checker: bool = SHARED_INPUTS.disable_safety_checker,
-        go_fast: bool = SHARED_INPUTS.go_fast_with_default(False),
-        megapixels: str = SHARED_INPUTS.megapixels,
-        replicate_weights: str = SHARED_INPUTS.lora_weights,
-        lora_scale: float = SHARED_INPUTS.lora_scale,
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        go_fast: bool = Inputs.go_fast_with_default(False),
+        megapixels: str = Inputs.megapixels,
+        replicate_weights: str = Inputs.lora_weights,
+        lora_scale: float = Inputs.lora_scale,
         extra_lora: str = Input(
             description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
             default=None,
@@ -1323,7 +1323,7 @@ class HotswapPredictor(BasePredictor):
             seed=seed,
             width=width,
             height=height,
-            mask=mask,
+            legacy_mask_path=mask,
         )
 
         return model.postprocess(
@@ -1497,6 +1497,7 @@ def maybe_scale_to_size_and_convert_to_tensor(
     # Resize with Lanczos
     resized = image.resize((width, height), Image.Resampling.LANCZOS)
     return transform(resized)[None, ...]  # type: ignore
+
 
 def maybe_crop_to_size_and_convert_to_tensor(
     image: Image.Image, width: int, height: int, grayscale: bool = False
