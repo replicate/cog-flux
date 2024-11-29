@@ -268,25 +268,35 @@ def convert_diffusers_to_flux_transformer_checkpoint(
             f"single_blocks.{i}.modulation.lin.weight",
         )
 
-        # Q, K, V, mlp - note that we don't support only tuning a subset of these at the moment (apply_linear1_lora_weight_to_module assumes all are implemented). ez fix if needed.
-        if f"{prefix}{block_prefix}attn.to_q.lora_A.weight" in diffusers_state_dict:
-            q_A = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_q.lora_A.weight")
-            q_B = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_q.lora_B.weight")
-            k_A = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_k.lora_A.weight")
-            k_B = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_k.lora_B.weight")
-            v_A = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_v.lora_A.weight")
-            v_B = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_v.lora_B.weight")
-            mlp_A = diffusers_state_dict.pop(
-                f"{prefix}{block_prefix}proj_mlp.lora_A.weight"
-            )
-            mlp_B = diffusers_state_dict.pop(
-                f"{prefix}{block_prefix}proj_mlp.lora_B.weight"
-            )
+        # Q, K, V, mlp
+        def pop_or_zeroes(key):
+            if f"{key}.lora_A.weight" in diffusers_state_dict:
+                A = diffusers_state_dict.pop(f"{key}.lora_A.weight")
+                B = diffusers_state_dict.pop(f"{key}.lora_B.weight")
+                return A, B
+            return None, None
+
+        q_A, q_B = pop_or_zeroes(f"{prefix}{block_prefix}attn.to_q")
+        k_A, k_B = pop_or_zeroes(f"{prefix}{block_prefix}attn.to_k")
+        v_A, v_B = pop_or_zeroes(f"{prefix}{block_prefix}attn.to_v")
+        mlp_A, mlp_B = pop_or_zeroes(f"{prefix}{block_prefix}proj_mlp")
+        A_weights = [q_A, k_A, v_A, mlp_A]
+        B_weights = [q_B, k_B, v_B, mlp_B]
+
+        # fill missing areas with zeros in linear1
+        # these all need to be the same rank, so find the first one present
+        first_A_weight = next((x for x in A_weights if x is not None), None)
+        if first_A_weight is not None:
+            for wi, w in enumerate(A_weights):
+                if w is None:
+                    A_weights[wi] = torch.zeros_like(first_A_weight)
+                    B_weights[wi] = A_weights[wi].T
+
             original_state_dict[f"single_blocks.{i}.linear1.lora_A.weight"] = torch.cat(
-                [q_A, k_A, v_A, mlp_A], dim=1
+                A_weights, dim=1
             )
             original_state_dict[f"single_blocks.{i}.linear1.lora_B.weight"] = torch.cat(
-                [q_B, k_B, v_B, mlp_B], dim=0
+                B_weights, dim=0
             )
 
         # output projections
