@@ -83,5 +83,4 @@ predict:
       match_prompt: 4 jpg images
 
   fuzz:
-    duration: 120
     iterations: 10
