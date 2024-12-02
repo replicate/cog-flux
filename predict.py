@@ -324,23 +324,6 @@ class Predictor(BasePredictor):
 
         print("compiled in ", time.time() - st)
 
-    # TODO(andreas): This is never used and will throw an error if
-    # used because aspect_ratio is not a valid argument to bf16_predict
-    # def compile_bf16(self):
-    #     print("compiling bf16 model")
-    #     st = time.time()
-
-    #     self.compile_run = True
-    #     self.bf16_predict(
-    #         prompt="a cool dog",
-    #         aspect_ratio="1:1",
-    #         num_outputs=1,
-    #         num_inference_steps=self.num_steps,
-    #         guidance=3.5,
-    #         seed=123,
-    #     )
-    #     print("compiled in ", time.time() - st)
-
     def aspect_ratio_to_width_height(self, aspect_ratio: str) -> tuple[int, int]:
         return ASPECT_RATIOS[aspect_ratio]
 
@@ -508,8 +491,6 @@ class Predictor(BasePredictor):
         )
         timesteps = get_schedule(
             num_inference_steps,
-            # TODO: this has changed in upstream flux to x.shape[1]
-            # (x.shape[-1] * x.shape[-2]) // 4,
             x.shape[1],
             shift=self.shift,
         )
@@ -1300,7 +1281,9 @@ class HotswapPredictor(BasePredictor):
                 )
                 go_fast = False
         else:
-            width, height = model.preprocess(aspect_ratio, megapixels=megapixels)
+            width, height = model.size_from_aspect_megapixels(
+                aspect_ratio, megapixels=megapixels
+            )
 
         model.handle_loras(
             go_fast, replicate_weights, lora_scale, extra_lora, extra_lora_scale
