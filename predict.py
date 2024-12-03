@@ -145,7 +145,6 @@ class Predictor(BasePredictor):
         disable_fp8: bool = False,
         t5=None,
         clip=None,
-        ae=None,
     ) -> None:
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
@@ -195,12 +194,9 @@ class Predictor(BasePredictor):
             self.flow_model_name, device="cpu" if self.offload else device
         )
         self.flux = self.flux.eval()
-        if ae:
-            self.ae = ae
-        else:
-            self.ae = load_ae(
-                self.flow_model_name, device="cpu" if self.offload else device
-            )
+        self.ae = load_ae(
+            self.flow_model_name, device="cpu" if self.offload else device
+        )
 
         self.num_steps = 4 if self.flow_model_name == "flux-schnell" else 28
         self.shift = self.flow_model_name != "flux-schnell"
@@ -802,8 +798,8 @@ class SchnellLoraPredictor(Predictor):
 
 
 class DevLoraPredictor(Predictor):
-    def setup(self, t5=None, clip=None, ae=None) -> None:
-        self.base_setup("flux-dev", compile_fp8=True, t5=t5, clip=clip, ae=ae)
+    def setup(self, t5=None, clip=None) -> None:
+        self.base_setup("flux-dev", compile_fp8=True, t5=t5, clip=clip)
         self.lora_setup()
 
     def predict(
@@ -877,7 +873,6 @@ class HotswapPredictor(BasePredictor):
         self.dev_lora.setup(
             t5=self.schnell_lora.t5,
             clip=self.schnell_lora.clip,
-            ae=self.schnell_lora.ae,
         )
 
     def predict(
@@ -890,7 +885,7 @@ class HotswapPredictor(BasePredictor):
             default=None,
         ),
         mask: Path = Input(
-            description="Image mask for image inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored.",
+            description="Image mask for image inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored. If mask is set then image is also required to be set.",
             default=None,
         ),
         aspect_ratio: str = Input(
