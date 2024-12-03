@@ -1038,7 +1038,6 @@ class SchnellReduxPredictor(_ReduxPredictor):
         self,
         redux_image: Path = Input(
             description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models",
-            default=None,
         ),
         aspect_ratio: str = Inputs.aspect_ratio,
         num_outputs: int = Inputs.num_outputs,
@@ -1089,7 +1088,6 @@ class DevReduxPredictor(_ReduxPredictor):
         self,
         redux_image: Path = Input(
             description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models",
-            default=None,
         ),
         aspect_ratio: str = Inputs.aspect_ratio,
         num_outputs: int = Inputs.num_outputs,
