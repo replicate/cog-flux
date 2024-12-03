@@ -95,6 +95,17 @@ predict:
         lora_scale: 0.9
       match_prompt: A drawing of a man thinking about an oven
 
+    # non-replicate weights no mlp trained
+    - inputs:
+        prompt: photo of a boy ANIMESTYLE
+        num_outputs: 1
+        num_inference_steps: 28
+        guidance_scale: 3.5
+        output_format: jpg
+        go_fast: true
+        lora_weights: https://storage.googleapis.com/replicate-models-public-test/flux-loras/fixed_lora.safetensors
+        lora_scale: 0.9
+      match_prompt: An anime drawing of a boy
 
   fuzz:
     fixed_inputs:

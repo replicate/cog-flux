@@ -268,7 +268,7 @@ def convert_diffusers_to_flux_transformer_checkpoint(
             f"single_blocks.{i}.modulation.lin.weight",
         )
 
-        # Q, K, V, mlp - note that we don't support only tuning a subset of these at the moment (apply_linear1_lora_weight_to_module assumes all are implemented). ez fix if needed.
+        # Q, K, V, mlp - note that we don't support only tuning a subset of Q, K, V at the moment. 
         if f"{prefix}{block_prefix}attn.to_q.lora_A.weight" in diffusers_state_dict:
             q_A = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_q.lora_A.weight")
             q_B = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_q.lora_B.weight")
@@ -276,11 +276,16 @@ def convert_diffusers_to_flux_transformer_checkpoint(
             k_B = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_k.lora_B.weight")
             v_A = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_v.lora_A.weight")
             v_B = diffusers_state_dict.pop(f"{prefix}{block_prefix}attn.to_v.lora_B.weight")
+
+            # some loras don't tune mlp_A or mlp_B - default value makes loading these a no-op. 
+            rank = q_A.shape[0]
             mlp_A = diffusers_state_dict.pop(
-                f"{prefix}{block_prefix}proj_mlp.lora_A.weight"
+                f"{prefix}{block_prefix}proj_mlp.lora_A.weight",
+                torch.zeros(rank, 3072, device=q_A.device, dtype=q_A.dtype)
             )
             mlp_B = diffusers_state_dict.pop(
-                f"{prefix}{block_prefix}proj_mlp.lora_B.weight"
+                f"{prefix}{block_prefix}proj_mlp.lora_B.weight",
+                torch.zeros(12288, rank, device=q_A.device, dtype=q_A.dtype)
             )
             original_state_dict[f"single_blocks.{i}.linear1.lora_A.weight"] = torch.cat(
                 [q_A, k_A, v_A, mlp_A], dim=1
