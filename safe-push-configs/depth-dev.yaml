@@ -1,0 +1,14 @@
+model: replicate/flux-depth-dev-internal-model
+test_model: replicate/test-flux-depth-dev
+test_hardware: cpu
+predict:
+  compare_outputs: false
+  predict_timeout: 300
+  test_cases:
+
+    # basic
+    - inputs:
+        prompt: A stormtrooper giving a lecture at a university
+        control_image: https://replicate.delivery/pbxt/IKFvJn5EpLuDDsFysOP4B1J9HvKDbMBCwZUK9n6p9mIPoQwG/sd.png
+        seed: 36414
+      match_prompt: An image of storm trooper

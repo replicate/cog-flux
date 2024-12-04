@@ -1,0 +1,13 @@
+model: replicate/flux-redux-schnell-internal-model
+test_model: replicate/test-flux-redux-schnell
+test_hardware: cpu
+predict:
+  compare_outputs: false
+  predict_timeout: 300
+  test_cases:
+
+    # basic
+    - inputs:
+        redux_image: https://replicate.delivery/yhqm/eGnzS3AVsry6VCfRTZEvI7aIe7Vdp2WzCgzfeWLHhGbz2P0bC/out-0.webp
+        seed: 2
+      match_prompt: An astronaut hatching from an egg on the moon

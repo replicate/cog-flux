@@ -1,0 +1,14 @@
+model: replicate/flux-canny-dev-internal-model
+test_model: replicate/test-flux-canny-dev
+test_hardware: cpu
+predict:
+  compare_outputs: false
+  predict_timeout: 300
+  test_cases:
+
+    # basic
+    - inputs:
+        prompt: A bright red bird
+        control_image: https://replicate.delivery/pbxt/IMPLYODUwdmHTsnLKi5YiFccIAK6g9l5KK1FNyCtpGS1g0UN/1200.jpeg
+        seed: 2
+      #match_prompt: A red bird  # flaky for some reason

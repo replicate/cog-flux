@@ -1,6 +1,7 @@
 import math
 from typing import Callable, Optional
 
+from PIL import Image
 import torch
 from einops import rearrange, repeat
 from torch import Tensor
@@ -8,7 +9,6 @@ from tqdm.auto import tqdm
 
 from .model import Flux
 from .modules.conditioner import HFEmbedder
-
 
 def get_noise(
     num_samples: int,
@@ -30,7 +30,9 @@ def get_noise(
     )
 
 
-def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[str]) -> dict[str, Tensor]:
+def prepare(
+    t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[str]
+) -> dict[str, Tensor]:
     bs, c, h, w = img.shape
     if bs == 1 and not isinstance(prompt, str):
         bs = len(prompt)
@@ -47,6 +49,56 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
     if isinstance(prompt, str):
         prompt = [prompt]
     txt = t5(prompt)
+    if txt.shape[0] == 1 and bs > 1:
+        txt = repeat(txt, "1 ... -> bs ...", bs=bs)
+    txt_ids = torch.zeros(bs, txt.shape[1], 3)
+
+    vec = clip(prompt)
+    if vec.shape[0] == 1 and bs > 1:
+        vec = repeat(vec, "1 ... -> bs ...", bs=bs)
+
+    return {
+        "img": img,
+        "img_ids": img_ids.to(img.device),
+        "txt": txt.to(img.device),
+        "txt_ids": txt_ids.to(img.device),
+        "vec": vec.to(img.device),
+    }
+
+
+def prepare_redux(
+    t5: HFEmbedder,
+    clip: HFEmbedder,
+    img: Tensor,
+    prompt: str | list[str],
+    encoder: "ReduxImageEncoder",
+    img_cond_path: str,
+) -> dict[str, Tensor]:
+    bs, _, h, w = img.shape
+    if bs == 1 and not isinstance(prompt, str):
+        bs = len(prompt)
+
+    img_cond = Image.open(img_cond_path).convert("RGB")
+    with torch.no_grad():
+        img_cond = encoder(img_cond)
+
+    img_cond = img_cond.to(torch.bfloat16)
+    if img_cond.shape[0] == 1 and bs > 1:
+        img_cond = repeat(img_cond, "1 ... -> bs ...", bs=bs)
+
+    img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
+    if img.shape[0] == 1 and bs > 1:
+        img = repeat(img, "1 ... -> bs ...", bs=bs)
+
+    img_ids = torch.zeros(h // 2, w // 2, 3)
+    img_ids[..., 1] = img_ids[..., 1] + torch.arange(h // 2)[:, None]
+    img_ids[..., 2] = img_ids[..., 2] + torch.arange(w // 2)[None, :]
+    img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
+
+    if isinstance(prompt, str):
+        prompt = [prompt]
+    txt = t5(prompt)
+    txt = torch.cat((txt, img_cond.to(txt)), dim=-2)
     if txt.shape[0] == 1 and bs > 1:
         txt = repeat(txt, "1 ... -> bs ...", bs=bs)
     txt_ids = torch.zeros(bs, txt.shape[1], 3)
@@ -104,6 +156,7 @@ def denoise_single_item(
     vec: Tensor,
     timesteps: list[float],
     guidance: float = 4.0,
+    img_cond: Tensor | None = None,
     compile_run: bool = False,
     image_latents: Optional[Tensor] = None,
     mask: Optional[Tensor] = None,
@@ -116,16 +169,20 @@ def denoise_single_item(
     vec = vec.unsqueeze(0)
     guidance_vec = torch.full((1,), guidance, device=img.device, dtype=img.dtype)
 
-    if compile_run: 
-        torch._dynamo.mark_dynamic(img, 1, min=256, max=8100) # needs at least torch 2.4 
+    if compile_run:
+        torch._dynamo.mark_dynamic(
+            img, 1, min=256, max=8100
+        )  # needs at least torch 2.4
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
+        torch._dynamo.mark_dynamic(img_cond, 1, min=256, max=8100)
         model = model.to(memory_format=torch.channels_last)
         model = torch.compile(model)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
+
         pred = model(
-            img=img,
+            img=torch.cat((img, img_cond), dim=-1) if img_cond is not None else img,
             img_ids=img_ids,
             txt=txt,
             txt_ids=txt_ids,
@@ -145,6 +202,7 @@ def denoise_single_item(
 
     return img, model
 
+
 def denoise(
     model: Flux,
     # model input
@@ -156,6 +214,7 @@ def denoise(
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
+    img_cond: Tensor | None = None,
     compile_run: bool = False,
     image_latents: Optional[Tensor] = None,
     mask: Optional[Tensor] = None,
@@ -166,23 +225,25 @@ def denoise(
 
     for i in range(batch_size):
         denoised_img, model = denoise_single_item(
-            model,
-            img[i],
-            img_ids[i],
-            txt[i],
-            txt_ids[i],
-            vec[i],
-            timesteps,
-            guidance,
-            compile_run,
-            image_latents,
-            mask,
-            None if noise is None else noise[i]
+            model=model,
+            img=img[i],
+            img_ids=img_ids[i],
+            txt=txt[i],
+            txt_ids=txt_ids[i],
+            vec=vec[i],
+            timesteps=timesteps,
+            guidance=guidance,
+            img_cond=None if img_cond is None else img_cond,
+            compile_run=compile_run,
+            image_latents=image_latents,
+            mask=mask,
+            noise=None if noise is None else noise[i]
         )
         compile_run = False
         output_imgs.append(denoised_img)
 
     return torch.cat(output_imgs), model
+
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
     return rearrange(

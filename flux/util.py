@@ -9,6 +9,7 @@ from safetensors.torch import load_file as load_sft
 from flux.model import Flux, FluxParams
 from flux.modules.autoencoder import AutoEncoder, AutoEncoderParams
 from flux.modules.conditioner import HFEmbedder
+from flux.modules.image_embedders import DepthImageEncoder, ReduxImageEncoder
 from flux.modules.quantize import replace_linear_weight_only_int8_per_channel
 from huggingface_hub import hf_hub_download
 from pathlib import Path
@@ -31,8 +32,20 @@ SCHNELL_CACHE = "./model-cache/schnell/schnell.sft"
 SCHNELL_URL = "https://weights.replicate.delivery/default/official-models/flux/schnell/schnell.sft"
 DEV_CACHE = "./model-cache/dev/dev.sft"
 DEV_URL = "https://weights.replicate.delivery/default/official-models/flux/dev/dev.sft"
+DEV_CANNY_CACHE = "./model-cache/dev-canny/dev-canny.safetensors"
+DEV_CANNY_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-canny-dev.safetensors"
+DEV_DEPTH_CACHE = "./model-cache/dev-depth/dev-depth.safetensors"
+DEV_DEPTH_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-depth-dev.safetensors"
+DEV_INPAINTING_CACHE = "./model-cache/dev-inpainting/dev-inpainting.safetensors"
+DEV_INPAINTING_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-fill-dev.safetensors"
 AE_CACHE = "./model-cache/ae/ae.sft"
 AE_URL = "https://weights.replicate.delivery/default/official-models/flux/ae/ae.sft"
+SIGLIP_URL = "https://weights.replicate.delivery/default/google/siglip-so400m-patch14-384/model-bf16.tar"
+SIGLIP_CACHE = "./model-cache/siglip"
+REDUX_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n-fill/flux1-redux-dev.safetensors"
+REDUX_CACHE = "./model-cache/redux/flux1-redux-dev.safetensors"
+DEPTH_URL = "https://weights.replicate.delivery/default/liheyoung/depth-anything-large/flux-depth-model.tar"
+DEPTH_CACHE = "./model-cache/depth"
 
 configs = {
     "flux-dev": ModelSpec(
@@ -40,6 +53,7 @@ configs = {
         ckpt_url=DEV_URL,
         params=FluxParams(
             in_channels=64,
+            out_channels=64,
             vec_in_dim=768,
             context_in_dim=4096,
             hidden_size=3072,
@@ -71,6 +85,7 @@ configs = {
         ckpt_url=SCHNELL_URL,
         params=FluxParams(
             in_channels=64,
+            out_channels=64,
             vec_in_dim=768,
             context_in_dim=4096,
             hidden_size=3072,
@@ -82,6 +97,102 @@ configs = {
             theta=10_000,
             qkv_bias=True,
             guidance_embed=False,
+        ),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
+    "flux-canny-dev": ModelSpec(
+        ckpt_path=DEV_CANNY_CACHE,
+        ckpt_url=DEV_CANNY_URL,
+        params=FluxParams(
+            in_channels=128,
+            out_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=True,
+        ),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
+    "flux-depth-dev": ModelSpec(
+        ckpt_path=DEV_DEPTH_CACHE,
+        ckpt_url=DEV_DEPTH_URL,
+        params=FluxParams(
+            in_channels=128,
+            out_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=True,
+        ),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
+    "flux-fill-dev": ModelSpec(
+        ckpt_path=DEV_INPAINTING_CACHE,
+        ckpt_url=DEV_INPAINTING_URL,
+        params=FluxParams(
+            in_channels=384,
+            out_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=True,
         ),
         ae_path=AE_CACHE,
         ae_url=AE_URL,
@@ -171,6 +282,20 @@ def load_ae(name: str, device: str | torch.device = "cuda") -> AutoEncoder:
         print_load_warning(missing, unexpected)
     return ae
 
+def load_redux(device: str | torch.device = "cuda") -> ReduxImageEncoder:
+    if not os.path.exists(SIGLIP_CACHE):
+        download_weights(SIGLIP_URL, SIGLIP_CACHE)
+    if not os.path.exists(REDUX_CACHE):
+        download_weights(REDUX_URL, REDUX_CACHE)
+
+    return ReduxImageEncoder(device, redux_path = REDUX_CACHE, siglip_path=SIGLIP_CACHE, dtype=torch.bfloat16)
+
+def load_depth_encoder(device: str | torch.device = "cuda") -> DepthImageEncoder:
+    if not os.path.exists(DEPTH_CACHE):
+        download_weights(DEPTH_URL, DEPTH_CACHE)
+
+    return DepthImageEncoder(device, DEPTH_CACHE)
+
 
 def download_ckpt_from_hf(
     repo_id: str,
@@ -188,7 +313,7 @@ def download_weights(url: str, dest: Path):
     print("downloading url: ", url)
     print("downloading to: ", dest)
     if url.endswith("tar"):
-        subprocess.check_call(["pget", "-x", url, dest], close_fds=False)
+        subprocess.check_call(["pget", "--log-level=WARNING", "-x", url, dest], close_fds=False)
     else:
-        subprocess.check_call(["pget", url, dest], close_fds=False)
+        subprocess.check_call(["pget", "--log-level=WARNING", url, dest], close_fds=False)
     print("downloading took: ", time.time() - start)
