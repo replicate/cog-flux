@@ -17,6 +17,7 @@ import math
 from torch import Tensor, nn
 from pydantic import BaseModel
 from torch.nn import functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 
 class FluxParams(BaseModel):
@@ -38,7 +39,8 @@ class FluxParams(BaseModel):
 # @torch.compile(mode="reduce-overhead", fullgraph=True, disable=DISABLE_COMPILE)
 def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor) -> Tensor:
     q, k = apply_rope(q, k, pe)
-    x = F.scaled_dot_product_attention(q, k, v).transpose(1, 2)
+    with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+        x = F.scaled_dot_product_attention(q, k, v).transpose(1, 2)
     x = x.reshape(*x.shape[:-2], -1)
     return x
 
