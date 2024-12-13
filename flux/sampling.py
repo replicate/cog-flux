@@ -74,8 +74,6 @@ def prepare_redux(
     encoder: "ReduxImageEncoder",
     img_cond_path: str,
 ) -> dict[str, Tensor]:
-    import pdb
-    pdb.set_trace()
     bs, _, h, w = img.shape
     if bs == 1 and not isinstance(prompt, str):
         bs = len(prompt)

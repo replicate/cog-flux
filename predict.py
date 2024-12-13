@@ -1039,7 +1039,6 @@ class SchnellReduxPredictor(_ReduxPredictor):
         redux_image: Path = Input(
             description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models",
         ),
-        prompt: str = Input(description="Additional prompt for guiding FLUX.1 Redux along with input image. Experimental", default=""),
         aspect_ratio: str = Inputs.aspect_ratio,
         num_outputs: int = Inputs.num_outputs,
         num_inference_steps: int = Input(
@@ -1055,6 +1054,7 @@ class SchnellReduxPredictor(_ReduxPredictor):
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         go_fast = False
+        prompt = ""
 
         # TODO: don't love passing this via a class variable, but it's better than totally breaking our abstractions.
         self.cur_prediction_redux_img = redux_image
@@ -1089,7 +1089,6 @@ class DevReduxPredictor(_ReduxPredictor):
         redux_image: Path = Input(
             description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models",
         ),
-        prompt: str = Input(description="Additional prompt for guiding FLUX.1 Redux along with input image. Experimental", default=""),
         aspect_ratio: str = Inputs.aspect_ratio,
         num_outputs: int = Inputs.num_outputs,
         num_inference_steps: int = Input(
@@ -1108,6 +1107,7 @@ class DevReduxPredictor(_ReduxPredictor):
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         go_fast = False
+        prompt = ""
 
         # TODO: don't love passing this via a class variable, but it's better than totally breaking our abstractions.
         self.cur_prediction_redux_img = redux_image
