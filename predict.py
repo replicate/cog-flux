@@ -140,10 +140,6 @@ class Inputs:
         default="1",
     )
 
-    @property
-    def go_fast(self) -> Input:
-        return self.go_fast_with_default(True)
-
     @staticmethod
     def go_fast_with_default(default: bool) -> Input:
         return Input(
@@ -825,7 +821,7 @@ class SchnellPredictor(Predictor):
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
-        go_fast: bool = Inputs.go_fast,
+        go_fast: bool = Inputs.go_fast_with_default(True),
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
@@ -875,7 +871,7 @@ class DevPredictor(Predictor):
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
-        go_fast: bool = Inputs.go_fast,
+        go_fast: bool = Inputs.go_fast_with_default(True),
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         if image and go_fast:
@@ -921,7 +917,7 @@ class SchnellLoraPredictor(Predictor):
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
-        go_fast: bool = Inputs.go_fast,
+        go_fast: bool = Inputs.go_fast_with_default(True),
         lora_weights: str = Inputs.lora_weights,
         lora_scale: float = Inputs.lora_scale,
         megapixels: str = Inputs.megapixels,
@@ -976,7 +972,7 @@ class DevLoraPredictor(Predictor):
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
-        go_fast: bool = Inputs.go_fast,
+        go_fast: bool = Inputs.go_fast_with_default(True),
         lora_weights: str = Inputs.lora_weights,
         lora_scale: float = Inputs.lora_scale,
         megapixels: str = Inputs.megapixels,
