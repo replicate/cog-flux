@@ -486,14 +486,9 @@ class Predictor(BasePredictor):
             seed=seed,
         )
 
-        if self.offload:
-            self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
-
-        inp = self.prepare(x, [prompt] * num_outputs)
-
         timesteps = get_schedule(
             num_inference_steps,
-            inp["img"].shape[1],
+            (x.shape[-1] * x.shape[-2]) // 4, # equivalent to inp["img"].shape[1], needs to be here for prompt strength in img2img
             shift=self.shift,
         )
 
@@ -502,6 +497,11 @@ class Predictor(BasePredictor):
             t = timesteps[t_idx]
             timesteps = timesteps[t_idx:]
             x = t * x + (1.0 - t) * init_image.to(x.dtype)
+
+        if self.offload:
+            self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
+
+        inp = self.prepare(x, [prompt] * num_outputs)
 
         if img_cond is not None:
             inp["img_cond"] = img_cond
