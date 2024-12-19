@@ -389,7 +389,7 @@ class Predictor(BasePredictor):
             lora_scale = lora_scale * self.fp8_lora_scale_multiplier
             cur_scale = self.fp8_lora_scale
             cur_extra_lora = self.fp8_extra_lora
-            cur_extra_lora_scale = extra_lora_scale 
+            cur_extra_lora_scale = self.fp8_extra_lora_scale 
 
             self.fp8_lora = LOADING
             self.fp8_extra_lora = LOADING
