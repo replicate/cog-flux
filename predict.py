@@ -376,9 +376,11 @@ class Predictor(BasePredictor):
         extra_lora_weights: str | None = None,
         extra_lora_scale: float = 1.0,
     ):
-        LOADING = "loading"
+        loading = "loading"
         if not lora_weights and extra_lora_weights:
-            print(f"extra_lora_weights {extra_lora_weights} were found, and lora_weights were None! This shouldn't happen. Setting lora_weights to {extra_lora_weights} and lora_scale to extra_lora_scale: {extra_lora_scale} and running.")
+            print(
+                f"extra_lora_weights {extra_lora_weights} were found, and lora_weights were None! This shouldn't happen. Setting lora_weights to {extra_lora_weights} and lora_scale to extra_lora_scale: {extra_lora_scale} and running."
+            )
             lora_weights = extra_lora_weights
             lora_scale = extra_lora_scale
             extra_lora_weights = None
@@ -389,10 +391,10 @@ class Predictor(BasePredictor):
             lora_scale = lora_scale * self.fp8_lora_scale_multiplier
             cur_scale = self.fp8_lora_scale
             cur_extra_lora = self.fp8_extra_lora
-            cur_extra_lora_scale = self.fp8_extra_lora_scale 
+            cur_extra_lora_scale = self.fp8_extra_lora_scale
 
-            self.fp8_lora = LOADING
-            self.fp8_extra_lora = LOADING
+            self.fp8_lora = loading
+            self.fp8_extra_lora = loading
 
         else:
             model = self.flux
@@ -401,8 +403,8 @@ class Predictor(BasePredictor):
             cur_extra_lora = self.bf16_extra_lora
             cur_extra_lora_scale = self.bf16_extra_lora_scale
 
-            self.bf16_lora = LOADING
-            self.bf16_extra_lora = LOADING
+            self.bf16_lora = loading
+            self.bf16_extra_lora = loading
 
         if lora_weights:
             # since we merge weights, need to reload for change in scale. auto-reloading for extra weights
@@ -427,7 +429,7 @@ class Predictor(BasePredictor):
             else:
                 print(f"Lora {lora_weights} already loaded")
                 if extra_lora_weights:
-                    print(F"Extra lora {extra_lora_weights} already loaded")
+                    print(f"Extra lora {extra_lora_weights} already loaded")
 
         elif cur_lora:
             unload_loras(model)
