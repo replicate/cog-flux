@@ -179,9 +179,13 @@ class Predictor(BasePredictor):
         self.weights_cache = WeightsDownloadCache()
         self.bf16_lora = None
         self.bf16_lora_scale = None
+        self.bf16_extra_lora = None
+        self.bf16_extra_lora_scale = None
         self.fp8_lora = None
         self.fp8_lora_scale = None
         self.fp8_lora_scale_multiplier = 1.5
+        self.fp8_extra_lora = None
+        self.fp8_extra_lora_scale = None
 
     def base_setup(
         self,
@@ -372,29 +376,45 @@ class Predictor(BasePredictor):
         extra_lora_weights: str | None = None,
         extra_lora_scale: float = 1.0,
     ):
+        loading = "loading"
+        if not lora_weights and extra_lora_weights:
+            print(
+                f"extra_lora_weights {extra_lora_weights} were found, and lora_weights were None! This shouldn't happen. Setting lora_weights to {extra_lora_weights} and lora_scale to extra_lora_scale: {extra_lora_scale} and running."
+            )
+            lora_weights = extra_lora_weights
+            lora_scale = extra_lora_scale
+            extra_lora_weights = None
+
         if go_fast:
             model = self.fp8_pipe.model
             cur_lora = self.fp8_lora
             lora_scale = lora_scale * self.fp8_lora_scale_multiplier
             cur_scale = self.fp8_lora_scale
+            cur_extra_lora = self.fp8_extra_lora
+            cur_extra_lora_scale = self.fp8_extra_lora_scale
 
-            self.fp8_lora = "loading"
+            self.fp8_lora = loading
+            self.fp8_extra_lora = loading
 
         else:
             model = self.flux
             cur_lora = self.bf16_lora
             cur_scale = self.bf16_lora_scale
+            cur_extra_lora = self.bf16_extra_lora
+            cur_extra_lora_scale = self.bf16_extra_lora_scale
 
-            self.bf16_lora = "loading"
+            self.bf16_lora = loading
+            self.bf16_extra_lora = loading
 
         if lora_weights:
             # since we merge weights, need to reload for change in scale. auto-reloading for extra weights
             if (
                 lora_weights != cur_lora
                 or lora_scale != cur_scale
-                or extra_lora_weights
+                or extra_lora_weights != cur_extra_lora
+                or extra_lora_scale != cur_extra_lora_scale
             ):
-                if cur_lora:
+                if cur_lora or cur_extra_lora:
                     unload_loras(model)
                 lora_path = self.weights_cache.ensure(lora_weights)
                 if extra_lora_weights:
@@ -408,16 +428,23 @@ class Predictor(BasePredictor):
                     load_lora(model, lora_path, lora_scale)
             else:
                 print(f"Lora {lora_weights} already loaded")
+                if extra_lora_weights:
+                    print(f"Extra lora {extra_lora_weights} already loaded")
+
         elif cur_lora:
             unload_loras(model)
 
         if go_fast:
             self.fp8_lora = lora_weights
             self.fp8_lora_scale = lora_scale
+            self.fp8_extra_lora = extra_lora_weights
+            self.fp8_extra_lora_scale = extra_lora_scale
 
         else:
             self.bf16_lora = lora_weights
             self.bf16_lora_scale = lora_scale
+            self.bf16_extra_lora = extra_lora_weights
+            self.bf16_extra_lora_scale = extra_lora_scale
 
     def size_from_aspect_megapixels(
         self, aspect_ratio: str, megapixels: str = "1"
