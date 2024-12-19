@@ -512,9 +512,11 @@ class Predictor(BasePredictor):
             dtype=torch.bfloat16,
             seed=seed,
         )
+
         timesteps = get_schedule(
             num_inference_steps,
-            x.shape[1],
+            # equivalent to inp["img"].shape[1], needs to be here for prompt strength in img2img
+            (x.shape[-1] * x.shape[-2]) // 4,
             shift=self.shift,
         )
 
