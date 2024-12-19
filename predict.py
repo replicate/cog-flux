@@ -377,6 +377,11 @@ class Predictor(BasePredictor):
         extra_lora_scale: float = 1.0,
     ):
         LOADING = "loading"
+        if not lora_weights and extra_lora_weights:
+            print(f"extra_lora_weights {extra_lora_weights} were found, and lora_weights were None! This shouldn't happen. Setting lora_weights to {extra_lora_weights} and lora_scale to extra_lora_scale: {extra_lora_scale} and running.")
+            lora_weights = extra_lora_weights
+            lora_scale = extra_lora_scale
+            extra_lora_weights = None
 
         if go_fast:
             model = self.fp8_pipe.model
