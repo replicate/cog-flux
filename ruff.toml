@@ -28,6 +28,7 @@ exclude = [
     "venv",
     "flux/",
     "fp8/",
+    "lora_loading.py"
 ]
 
 # Same as Black.
