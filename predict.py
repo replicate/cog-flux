@@ -197,7 +197,7 @@ class Predictor(BasePredictor):
         clip=None,
         ae=None,
     ) -> None:
-        self.flow_model_name = flow_model_name
+        self.flow_model_name = flow_model_name.rstrip("-fp8")
         print(f"Booting model {self.flow_model_name}")
 
         gpu_name = (
@@ -547,7 +547,7 @@ class Predictor(BasePredictor):
             self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
             torch.cuda.empty_cache()
             self.flux = self.flux.to(torch_device)
-
+            
         x, flux = denoise(
             self.flux,
             **inp,
