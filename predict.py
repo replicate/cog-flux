@@ -342,14 +342,20 @@ class Predictor(BasePredictor):
             print(f"warming kernel for {k}")
             width, height = self.aspect_ratio_to_width_height(k)
             self.bf16_predict(
-                prompt="godzilla!", width=width, height=height, num_steps=4, guidance=3
+                prompt="godzilla!", 
+                width=width, 
+                height=height, 
+                num_inference_steps=4, 
+                guidance=3,
+                num_outputs=1
             )
-            self.fp8_pipe.generate(
+            self.bf16_predict(
                 prompt="godzilla!",
                 width=width // 2,
                 height=height // 2,
-                num_steps=4,
+                num_inference_steps=4,
                 guidance=3,
+                num_outputs=1
             )
         
         print("bf16 compiled in ", time.time() - st)

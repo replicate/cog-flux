@@ -174,7 +174,8 @@ def denoise_single_item(
             img, 1, min=256, max=8100
         )  # needs at least torch 2.4
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
-        torch._dynamo.mark_dynamic(img_cond, 1, min=256, max=8100)
+        if img_cond:
+            torch._dynamo.mark_dynamic(img_cond, 1, min=256, max=8100)
         model = model.to(memory_format=torch.channels_last)
         model = torch.compile(model)
 
