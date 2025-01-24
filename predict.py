@@ -254,7 +254,7 @@ class Predictor(BasePredictor):
 
         self.num_steps = 4 if self.flow_model_name == FLUX_SCHNELL else 28
         self.shift = self.flow_model_name != FLUX_SCHNELL
-        self.compile_run = False
+        self.compile_bf16_run = False
 
         shared_models = LoadedModels(
             flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
@@ -323,6 +323,37 @@ class Predictor(BasePredictor):
             )
 
         print("compiled in ", time.time() - st)
+
+    def compile_bf16(self):
+        print("compiling bf16 model")
+        st = time.time()
+        self.compile_bf16_run = True
+        self.bf16_predict(
+            prompt="godzilla!!", 
+            num_outputs=1, 
+            num_inference_steps=4, 
+            guidance=3.5, 
+            seed=123, 
+            width=1024,
+            height=1024
+        )
+
+        for k in ASPECT_RATIOS:
+            print(f"warming kernel for {k}")
+            width, height = self.aspect_ratio_to_width_height(k)
+            self.bf16_predict(
+                prompt="godzilla!", width=width, height=height, num_steps=4, guidance=3
+            )
+            self.fp8_pipe.generate(
+                prompt="godzilla!",
+                width=width // 2,
+                height=height // 2,
+                num_steps=4,
+                guidance=3,
+            )
+        
+        print("bf16 compiled in ", time.time() - st)
+
 
     def aspect_ratio_to_width_height(self, aspect_ratio: str) -> tuple[int, int]:
         return ASPECT_RATIOS[aspect_ratio]
@@ -553,11 +584,11 @@ class Predictor(BasePredictor):
             **inp,
             timesteps=timesteps,
             guidance=guidance,
-            compile_run=self.compile_run,
+            compile_run=self.compile_bf16_run,
         )
 
-        if self.compile_run:
-            self.compile_run = False
+        if self.compile_bf16_run:
+            self.compile_bf16_run = False
             self.flux = flux
 
         if self.offload:
@@ -971,6 +1002,53 @@ class SchnellLoraPredictor(Predictor):
             np_images=np_imgs,
         )
 
+class SpecificSchnellLoraPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup(FLUX_SCHNELL, disable_fp8=True)
+        self.lora_setup()
+        lora_weights = 'some_lora'
+        lora_scale = 1.0
+        self.handle_loras(False, lora_weights, lora_scale)
+        self.compile_bf16()
+    
+    def predict(
+        self,
+        prompt: str = Inputs.prompt,
+        aspect_ratio: str = Inputs.aspect_ratio,
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=4, default=4, recommended=4
+        ),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        # go_fast: bool = Inputs.go_fast_with_default(True),
+        # lora_weights: str = Inputs.lora_weights,
+        # lora_scale: float = Inputs.lora_scale,
+        megapixels: str = Inputs.megapixels,
+    ) -> List[Path]:
+        # self.handle_loras(go_fast, lora_weights, lora_scale)
+        go_fast = False
+
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
+        imgs, np_imgs = self.shared_predict(
+            go_fast,
+            prompt,
+            num_outputs,
+            num_inference_steps=num_inference_steps,
+            seed=seed,
+            width=width,
+            height=height,
+        )
+
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
 
 class DevLoraPredictor(Predictor):
     def setup(self, t5=None, clip=None, ae=None) -> None:
