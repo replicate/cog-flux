@@ -1207,6 +1207,62 @@ class FillDevPredictor(Predictor):
             np_images=np_imgs,
         )
 
+class FillDevLoraPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup("flux-fill-dev", disable_fp8=True)
+        self.lora_setup()
+
+    
+    def predict(
+        self,
+        prompt: str = Inputs.prompt,
+        image: Path = Input(
+            description=f"The image to inpaint. Can contain alpha mask. If the image width or height are not multiples of 32, they will be scaled to the closest multiple of 32. If the image dimensions don't fit within {MAX_IMAGE_SIZE}x{MAX_IMAGE_SIZE}, it will be scaled down to fit."
+        ),
+        mask: Path = Input(
+            description="A black-and-white image that describes the part of the image to inpaint. Black areas will be preserved while white areas will be inpainted.",
+            default=None,
+        ),
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=28, recommended=(28, 50)
+        ),
+        guidance: float = Inputs.guidance_with(default=30, le=100),
+        seed: int = Inputs.seed,
+        megapixels: str = Inputs.megapixels_with_match_input,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        lora_weights: str = Inputs.lora_weights,
+        lora_scale: float = Inputs.lora_scale,
+        # go_fast: bool = Inputs.go_fast,
+    ) -> List[Path]:
+        # TODO(andreas): This means we're reading the image twice
+        # which is a bit inefficient.
+        self.handle_loras(False, lora_weights, lora_scale)
+
+        width, height = self.size_maybe_match_input(image, megapixels)
+
+        imgs, np_imgs = self.shared_predict(
+            go_fast=False,
+            prompt=prompt,
+            num_outputs=num_outputs,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
+            image=image,
+            mask=mask,
+            seed=seed,
+            width=width,
+            height=height,
+        )
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
 
 class HotswapPredictor(BasePredictor):
     def setup(self) -> None:

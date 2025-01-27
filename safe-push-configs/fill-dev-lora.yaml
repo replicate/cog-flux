@@ -1,0 +1,15 @@
+model: replicate/flux-dev-fill-internal-model
+test_model: replicate/test-flux-dev-fill
+test_hardware: cpu
+predict:
+  compare_outputs: false
+  predict_timeout: 300
+  test_cases:
+
+    # basic
+    - inputs:
+        image: https://replicate.delivery/mgxm/f8c9cb3a-8ee8-41a7-9ef6-c65b37acc8af/desktop.png
+        mask: https://replicate.delivery/mgxm/188d0097-6a6f-4488-a058-b0b7a66e5677/desktop-mask.png
+        prompt: A herd of sheep grazing on a hill
+        seed: 2
+      match_prompt: An image of sheep grazing on a hill
