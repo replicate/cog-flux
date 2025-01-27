@@ -27,7 +27,7 @@ import platform
 from torchvision.transforms import functional as TF
 from tqdm import tqdm
 
-import lora_loading as lora_loading
+import fp8.lora_loading as lora_loading
 from fp8.image_encoder import ImageEncoder
 from fp8.util import (
     LoadedModels,
@@ -156,7 +156,7 @@ class FluxPipeline:
             scale (float): Scaling factor for the LoRA weights.
 
         """
-        self.model = lora_loading.apply_lora_to_model_and_store_clones(self.model, lora_path, scale)
+        self.model = lora_loading.apply_lora_to_model(self.model, lora_path, scale)
 
     @torch.inference_mode()
     def compile(self):

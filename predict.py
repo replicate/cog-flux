@@ -25,7 +25,7 @@ from flux.sampling import (
 )
 from fp8.flux_pipeline import FluxPipeline
 from fp8.util import LoadedModels
-from lora_loading import load_lora, load_loras, unload_loras
+from fp8.lora_loading import load_lora, load_loras, unload_loras
 
 import numpy as np
 from einops import rearrange
