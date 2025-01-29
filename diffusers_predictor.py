@@ -72,6 +72,7 @@ class LoadedLoRAs:
 class Predictor(BasePredictor):
     def setup(
         self, 
+        model_path: str,
         weights_cache: WeightsDownloadCache,
         vae: AutoencoderKL | None = None,
         text_encoder: CLIPTextModel | None = None,
@@ -87,101 +88,59 @@ class Predictor(BasePredictor):
         # dependency injection hell yeah it's java time baybee
         self.weights_cache = weights_cache
 
-        print("Loading Flux dev pipeline")
-        if not FLUX_DEV_PATH.exists():
-            download_base_weights(MODEL_URL_DEV, Path("."))
-        dev_pipe = FluxPipeline.from_pretrained(
-            "FLUX.1-dev",
+        if not os.path.exists(model_path):
+            print(f"Model path not found, downloading models")
+            download_base_weights(model_path, Path("."))
+
+        print("Loading pipeline")
+        txt2img_pipe = FluxPipeline.from_pretrained(
+            model_path,
+            vae=vae,
+            text_encoder=text_encoder,
+            text_encoder_2=text_encoder_2,
+            tokenizer=tokenizer,
+            tokenizer_2=tokenizer_2,
             torch_dtype=torch.bfloat16,
         ).to("cuda")
-        dev_pipe.__class__.load_lora_into_transformer = classmethod(
+        txt2img_pipe.__class__.load_lora_into_transformer = classmethod(
             load_lora_into_transformer
         )
+        self.txt2img_pipe = txt2img_pipe
 
-        print("Loading Flux schnell pipeline")
-        if not FLUX_SCHNELL_PATH.exists():
-            download_base_weights(MODEL_URL_SCHNELL, FLUX_SCHNELL_PATH)
-        schnell_pipe = FluxPipeline.from_pretrained(
-            "FLUX.1-schnell",
-            vae=dev_pipe.vae,
-            text_encoder=dev_pipe.text_encoder,
-            text_encoder_2=dev_pipe.text_encoder_2,
-            tokenizer=dev_pipe.tokenizer,
-            tokenizer_2=dev_pipe.tokenizer_2,
-            torch_dtype=torch.bfloat16,
-        ).to("cuda")
-
-        self.pipes = {
-            "dev": dev_pipe,
-            "schnell": schnell_pipe,
-        }
 
         # Load img2img pipelines
-        print("Loading Flux dev img2img pipeline")
-        dev_img2img_pipe = FluxImg2ImgPipeline(
-            transformer=dev_pipe.transformer,
-            scheduler=dev_pipe.scheduler,
-            vae=dev_pipe.vae,
-            text_encoder=dev_pipe.text_encoder,
-            text_encoder_2=dev_pipe.text_encoder_2,
-            tokenizer=dev_pipe.tokenizer,
-            tokenizer_2=dev_pipe.tokenizer_2,
+        img2img_pipe = FluxImg2ImgPipeline(
+            transformer=txt2img_pipe.transformer,
+            scheduler=txt2img_pipe.scheduler,
+            vae=txt2img_pipe.vae,
+            text_encoder=txt2img_pipe.text_encoder,
+            text_encoder_2=txt2img_pipe.text_encoder_2,
+            tokenizer=txt2img_pipe.tokenizer,
+            tokenizer_2=txt2img_pipe.tokenizer_2,
         ).to("cuda")
-        dev_img2img_pipe.__class__.load_lora_into_transformer = classmethod(
+        img2img_pipe.__class__.load_lora_into_transformer = classmethod(
             load_lora_into_transformer
         )
 
-        print("Loading Flux schnell img2img pipeline")
-        schnell_img2img_pipe = FluxImg2ImgPipeline(
-            transformer=schnell_pipe.transformer,
-            scheduler=schnell_pipe.scheduler,
-            vae=schnell_pipe.vae,
-            text_encoder=schnell_pipe.text_encoder,
-            text_encoder_2=schnell_pipe.text_encoder_2,
-            tokenizer=schnell_pipe.tokenizer,
-            tokenizer_2=schnell_pipe.tokenizer_2,
-        ).to("cuda")
-
-        self.img2img_pipes = {
-            "dev": dev_img2img_pipe,
-            "schnell": schnell_img2img_pipe,
-        }
+        self.img2img_pipe = img2img_pipe
 
         # Load inpainting pipelines
-        print("Loading Flux dev inpaint pipeline")
-        dev_inpaint_pipe = FluxInpaintPipeline(
-            transformer=dev_pipe.transformer,
-            scheduler=dev_pipe.scheduler,
-            vae=dev_pipe.vae,
-            text_encoder=dev_pipe.text_encoder,
-            text_encoder_2=dev_pipe.text_encoder_2,
-            tokenizer=dev_pipe.tokenizer,
-            tokenizer_2=dev_pipe.tokenizer_2,
+        inpaint_pipe = FluxInpaintPipeline(
+            transformer=txt2img_pipe.transformer,
+            scheduler=txt2img_pipe.scheduler,
+            vae=txt2img_pipe.vae,
+            text_encoder=txt2img_pipe.text_encoder,
+            text_encoder_2=txt2img_pipe.text_encoder_2,
+            tokenizer=txt2img_pipe.tokenizer,
+            tokenizer_2=txt2img_pipe.tokenizer_2,
         ).to("cuda")
-        dev_inpaint_pipe.__class__.load_lora_into_transformer = classmethod(
+        inpaint_pipe.__class__.load_lora_into_transformer = classmethod(
             load_lora_into_transformer
         )
 
-        print("Loading Flux schnell inpaint pipeline")
-        schnell_inpaint_pipe = FluxInpaintPipeline(
-            transformer=schnell_pipe.transformer,
-            scheduler=schnell_pipe.scheduler,
-            vae=schnell_pipe.vae,
-            text_encoder=schnell_pipe.text_encoder,
-            text_encoder_2=schnell_pipe.text_encoder_2,
-            tokenizer=schnell_pipe.tokenizer,
-            tokenizer_2=schnell_pipe.tokenizer_2,
-        ).to("cuda")
+        self.inpaint_pipe = inpaint_pipe
 
-        self.inpaint_pipes = {
-            "dev": dev_inpaint_pipe,
-            "schnell": schnell_inpaint_pipe,
-        }
-
-        self.loaded_lora_urls = {
-            "dev": LoadedLoRAs(main=None, extra=None),
-            "schnell": LoadedLoRAs(main=None, extra=None),
-        }
+        self.loaded_lora_urls = LoadedLoRAs(main=None, extra=None),
         print("setup took: ", time.time() - start)
 
     @torch.inference_mode()

@@ -197,6 +197,8 @@ class Predictor(BasePredictor):
         clip=None,
         ae=None,
     ) -> None:
+        # TODO: ...perhaps base setup is unnecessary? something like models = {}, models = predictor1.setup(**models), models = predictor2.setup(**models), the end. 
+        # and then each individual predictor knows how to route between models. no more subclasses.
         self.flow_model_name = flow_model_name.rstrip("-fp8")
         print(f"Booting model {self.flow_model_name}")
 
@@ -308,9 +310,9 @@ class Predictor(BasePredictor):
             compiling=True,
         )
 
-        for k in ASPECT_RATIOS:
+        for k, v in ASPECT_RATIOS:
             print(f"warming kernel for {k}")
-            width, height = self.aspect_ratio_to_width_height(k)
+            width, height = v
             self.fp8_pipe.generate(
                 prompt="godzilla!", width=width, height=height, num_steps=4, guidance=3
             )
@@ -323,9 +325,6 @@ class Predictor(BasePredictor):
             )
 
         print("compiled in ", time.time() - st)
-
-    def aspect_ratio_to_width_height(self, aspect_ratio: str) -> tuple[int, int]:
-        return ASPECT_RATIOS[aspect_ratio]
 
     def prepare_legacy_mask(
         self,
@@ -835,7 +834,10 @@ class Predictor(BasePredictor):
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup(FLUX_SCHNELL, compile_fp8=True)
+        self.bf16_model = BFLModel(FLUX_SCHNELL)
+        self.fp8_model = BFLFP8Model(FLUX_SCHNELL, compile=True)
+        # TODO: refactor
+        # self.base_setup(FLUX_SCHNELL, compile_fp8=True)
 
     def predict(
         self,
@@ -852,16 +854,20 @@ class SchnellPredictor(Predictor):
         go_fast: bool = Inputs.go_fast_with_default(True),
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
+        model = self.fp8_model if go_fast else self.bf16_model
+        
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
-            prompt,
-            num_outputs,
-            num_inference_steps=num_inference_steps,
-            seed=seed,
-            width=width,
-            height=height,
-        )
+        imgs, np_imgs = model.predict(prompt, num_outputs, num_inference_steps, seed, width, height)
+         
+        # imgs, np_imgs = self.shared_predict(
+        #     go_fast,
+        #     prompt,
+        #     num_outputs,
+        #     num_inference_steps=num_inference_steps,
+        #     seed=seed,
+        #     width=width,
+        #     height=height,
+        # )
 
         return self.postprocess(
             imgs,
@@ -874,7 +880,11 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup(FLUX_DEV, compile_fp8=True)
+        self.bf16_model = BFLModel(FLUX_DEV)
+        loaded_models = self.bf16_model.get_models()
+        self.fp8_model = BFLFP8Model(FLUX_DEV, compile=True)
+        #self.base_setup(FLUX_DEV, compile_fp8=True)
+        
 
     def predict(
         self,
@@ -906,18 +916,21 @@ class DevPredictor(Predictor):
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
-            prompt,
-            num_outputs,
-            num_inference_steps,
-            guidance=guidance,
-            image=image,
-            prompt_strength=prompt_strength,
-            seed=seed,
-            width=width,
-            height=height,
-        )
+        model = self.fp8_model if go_fast else self.bf16_model
+        imgs, np_imgs = model.predict(prompt, num_outputs, num_inference_steps, guidance, image, prompt_strength, seed, width, height)
+        
+        # imgs, np_imgs = self.shared_predict(
+        #     go_fast,
+        #     prompt,
+        #     num_outputs,
+        #     num_inference_steps,
+        #     guidance=guidance,
+        #     image=image,
+        #     prompt_strength=prompt_strength,
+        #     seed=seed,
+        #     width=width,
+        #     height=height,
+        # )
 
         return self.postprocess(
             imgs,
@@ -930,8 +943,11 @@ class DevPredictor(Predictor):
 
 class SchnellLoraPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup(FLUX_SCHNELL, compile_fp8=True)
-        self.lora_setup()
+        self.bf16_model = BFLLoraModel(FLUX_SCHNELL) # TODO: are these different? 
+        loaded_models = self.bf16_model.get_models()
+        self.fp8_model = BFLFP8LoraModel(FLUX_SCHNELL, compile=True)
+        # self.base_setup(FLUX_SCHNELL, compile_fp8=True)
+        # self.lora_setup()
 
     def predict(
         self,
@@ -950,11 +966,11 @@ class SchnellLoraPredictor(Predictor):
         lora_scale: float = Inputs.lora_scale,
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
-        self.handle_loras(go_fast, lora_weights, lora_scale)
+        model = self.fp8_model if go_fast else self.bf16_model
+        model.handle_loras(go_fast, lora_weights, lora_scale)
 
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
+        imgs, np_imgs = model.predict(
             prompt,
             num_outputs,
             num_inference_steps=num_inference_steps,
@@ -974,8 +990,9 @@ class SchnellLoraPredictor(Predictor):
 
 class DevLoraPredictor(Predictor):
     def setup(self, t5=None, clip=None, ae=None) -> None:
-        self.base_setup(FLUX_DEV, compile_fp8=True, t5=t5, clip=clip, ae=ae)
-        self.lora_setup()
+        self.bf16_model = BFLLoraModel(FLUX_DEV) # TODO: are these different? 
+        loaded_models = self.bf16_model.get_models()
+        self.fp8_model = BFLFP8LoraModel(FLUX_DEV, compile=True)
 
     def predict(
         self,
@@ -1009,10 +1026,11 @@ class DevLoraPredictor(Predictor):
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
 
-        self.handle_loras(go_fast, lora_weights, lora_scale)
+        model = self.fp8_model if go_fast else self.bf16_model
+        model.handle_loras(go_fast, lora_weights, lora_scale)
 
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
+        imgs, np_imgs = model.predict(
             go_fast,
             prompt,
             num_outputs,
@@ -1210,20 +1228,15 @@ class FillDevPredictor(Predictor):
 
 class HotswapPredictor(BasePredictor):
     def setup(self) -> None:
-        self.schnell_fp8 = 
-        self.schnell_bf16 = 
-        self.dev_fp8 = 
-        self.dev_bf16 = 
-        
-        self.schnell_lora = SchnellLoraPredictor()
-        self.schnell_lora.setup()
+        # self.schnell_lora = SchnellLoraPredictor()
+        # self.schnell_lora.setup()
 
-        self.dev_lora = DevLoraPredictor()
-        self.dev_lora.setup(
-            t5=self.schnell_lora.t5,
-            clip=self.schnell_lora.clip,
-            ae=self.schnell_lora.ae,
-        )
+        # self.dev_lora = DevLoraPredictor()
+        # self.dev_lora.setup(
+        #     t5=self.schnell_lora.t5,
+        #     clip=self.schnell_lora.clip,
+        #     ae=self.schnell_lora.ae,
+        # )
 
     def predict(
         self,
