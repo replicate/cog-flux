@@ -25,7 +25,7 @@ from transformers import (
 
 from weights import WeightsDownloadCache
 
-# TODO: this has been built into diffusers now. 
+# TODO: this has been built into diffusers now.
 from lora_loading_patch import load_lora_into_transformer
 
 MODEL_URL_DEV = (
@@ -71,15 +71,15 @@ class LoadedLoRAs:
 
 class Predictor(BasePredictor):
     def setup(
-        self, 
+        self,
         model_path: str,
         weights_cache: WeightsDownloadCache,
         vae: AutoencoderKL | None = None,
         text_encoder: CLIPTextModel | None = None,
         text_encoder_2: T5EncoderModel | None = None,
         tokenizer: CLIPTokenizer | None = None,
-        tokenizer_2: T5TokenizerFast | None = None
-        ) -> None:  # pyright: ignore
+        tokenizer_2: T5TokenizerFast | None = None,
+    ) -> None:  # pyright: ignore
         """Load the model into memory to make running multiple predictions efficient"""
         start = time.time()
         # Don't pull weights
@@ -106,7 +106,6 @@ class Predictor(BasePredictor):
             load_lora_into_transformer
         )
         self.txt2img_pipe = txt2img_pipe
-
 
         # Load img2img pipelines
         img2img_pipe = FluxImg2ImgPipeline(
@@ -140,7 +139,7 @@ class Predictor(BasePredictor):
 
         self.inpaint_pipe = inpaint_pipe
 
-        self.loaded_lora_urls = LoadedLoRAs(main=None, extra=None),
+        self.loaded_lora_urls = (LoadedLoRAs(main=None, extra=None),)
         print("setup took: ", time.time() - start)
 
     @torch.inference_mode()
