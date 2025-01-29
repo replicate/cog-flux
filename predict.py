@@ -6,6 +6,8 @@ from typing import Any, Tuple
 import torch
 from torch import Tensor
 
+from bfl_predictor import BflBf16Predictor, BflFp8Predictor
+
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -177,27 +179,10 @@ class Predictor(BasePredictor):
 
     def lora_setup(self):
         self.weights_cache = WeightsDownloadCache()
-        self.bf16_lora = None
-        self.bf16_lora_scale = None
-        self.bf16_extra_lora = None
-        self.bf16_extra_lora_scale = None
-        self.fp8_lora = None
-        self.fp8_lora_scale = None
-        self.fp8_lora_scale_multiplier = 1.5
-        self.fp8_extra_lora = None
-        self.fp8_extra_lora_scale = None
 
     def base_setup(
         self,
-        flow_model_name: str,
-        compile_fp8: bool = False,
-        compile_bf16: bool = False,
-        disable_fp8: bool = False,
-        t5=None,
-        clip=None,
-        ae=None,
     ) -> None:
-        self.flow_model_name = flow_model_name.rstrip("-fp8")
         print(f"Booting model {self.flow_model_name}")
 
         gpu_name = (
@@ -224,227 +209,17 @@ class Predictor(BasePredictor):
         )
         self.falcon_processor = ViTImageProcessor.from_pretrained(FALCON_MODEL_NAME)
 
+    def should_offload(self):
         # need > 48 GB of ram to store all models in VRAM
         total_mem = torch.cuda.get_device_properties(0).total_memory
         self.offload = total_mem < 48 * 1024**3
         if self.offload:
             print("GPU memory is:", total_mem / 1024**3, ", offloading models")
-            compile_fp8 = False
-
-        device = "cuda"
-        max_length = 256 if self.flow_model_name == FLUX_SCHNELL else 512
-        if t5:
-            self.t5 = t5
-        else:
-            self.t5 = load_t5(device, max_length=max_length)
-        if clip:
-            self.clip = clip
-        else:
-            self.clip = load_clip(device)
-        self.flux = load_flow_model(
-            self.flow_model_name, device="cpu" if self.offload else device
-        )
-        self.flux = self.flux.eval()
-        if ae:
-            self.ae = ae
-        else:
-            self.ae = load_ae(
-                self.flow_model_name, device="cpu" if self.offload else device
-            )
-
-        self.num_steps = 4 if self.flow_model_name == FLUX_SCHNELL else 28
-        self.shift = self.flow_model_name != FLUX_SCHNELL
-        self.compile_run = False
-
-        shared_models = LoadedModels(
-            flow=None, ae=self.ae, clip=self.clip, t5=self.t5, config=None
-        )
-
-        self.vae_scale_factor = 8
-        self.disable_fp8 = disable_fp8
-
-        if not self.disable_fp8:
-            if compile_fp8:
-                extra_args = {
-                    "compile_whole_model": True,
-                    "compile_extras": True,
-                    "compile_blocks": True,
-                }
-            else:
-                extra_args = {
-                    "compile_whole_model": False,
-                    "compile_extras": False,
-                    "compile_blocks": False,
-                }
-
-            if self.offload:
-                extra_args |= {
-                    "offload_text_encoder": True,
-                    "offload_vae": True,
-                    "offload_flow": True,
-                }
-            self.fp8_pipe = FluxPipeline.load_pipeline_from_config_path(
-                f"fp8/configs/config-1-{flow_model_name}-h100.json",
-                shared_models=shared_models,
-                **extra_args,  # type: ignore
-            )
-
-            if compile_fp8:
-                self.compile_fp8()
-
-        if compile_bf16:
-            self.compile_bf16()
-
-    def compile_fp8(self):
-        print("compiling fp8 model")
-        st = time.time()
-        self.fp8_pipe.generate(
-            prompt="a cool dog",
-            width=1344,
-            height=768,
-            num_steps=self.num_steps,
-            guidance=3,
-            seed=123,
-            compiling=True,
-        )
-
-        for k in ASPECT_RATIOS:
-            print(f"warming kernel for {k}")
-            width, height = self.aspect_ratio_to_width_height(k)
-            self.fp8_pipe.generate(
-                prompt="godzilla!", width=width, height=height, num_steps=4, guidance=3
-            )
-            self.fp8_pipe.generate(
-                prompt="godzilla!",
-                width=width // 2,
-                height=height // 2,
-                num_steps=4,
-                guidance=3,
-            )
-
-        print("compiled in ", time.time() - st)
-
-    def aspect_ratio_to_width_height(self, aspect_ratio: str) -> tuple[int, int]:
-        return ASPECT_RATIOS[aspect_ratio]
-
-    def prepare_legacy_mask(
-        self,
-        mask_path: Path,
-        init_image: Tensor,
-        noise: Tensor,
-        width: int,
-        height: int,
-    ) -> tuple[Tensor, Tensor, Tensor]:
-        image = Image.open(mask_path).convert("L")
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-            ]
-        )
-        img: torch.Tensor = transform(image)
-        img[img < 0.5] = 0
-        img[img > 0.5] = 1
-        mask = img[None, ...]
-
-        mask_height = int(height) // self.vae_scale_factor
-        mask_width = int(width) // self.vae_scale_factor
-        mask = torch.nn.functional.interpolate(mask, size=(mask_height, mask_width))
-        mask = mask.to(device=torch.device("cuda"), dtype=torch.bfloat16)
-
-        def pack_img(img):
-            return rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-
-        mask = pack_img(mask.repeat(1, 16, 1, 1))
-        noise = pack_img(noise)
-        image_latents = pack_img(init_image.to(dtype=torch.bfloat16))
-
-        return mask, noise, image_latents
+        return self.offload
 
     # TODO(andreas): make this an abstract class
     def predict(self):
         raise Exception("You need to instantiate a predictor for a specific flux model")
-
-    def prepare(self, x, prompt):
-        return prepare(t5=self.t5, clip=self.clip, img=x, prompt=prompt)
-
-    @torch.inference_mode()
-    def handle_loras(
-        self,
-        go_fast: bool,
-        lora_weights: str | None = None,
-        lora_scale: float = 1.0,
-        extra_lora_weights: str | None = None,
-        extra_lora_scale: float = 1.0,
-    ):
-        loading = "loading"
-        if not lora_weights and extra_lora_weights:
-            print(
-                f"extra_lora_weights {extra_lora_weights} were found, and lora_weights were None! This shouldn't happen. Setting lora_weights to {extra_lora_weights} and lora_scale to extra_lora_scale: {extra_lora_scale} and running."
-            )
-            lora_weights = extra_lora_weights
-            lora_scale = extra_lora_scale
-            extra_lora_weights = None
-
-        if go_fast:
-            model = self.fp8_pipe.model
-            cur_lora = self.fp8_lora
-            lora_scale = lora_scale * self.fp8_lora_scale_multiplier
-            cur_scale = self.fp8_lora_scale
-            cur_extra_lora = self.fp8_extra_lora
-            cur_extra_lora_scale = self.fp8_extra_lora_scale
-
-            self.fp8_lora = loading
-            self.fp8_extra_lora = loading
-
-        else:
-            model = self.flux
-            cur_lora = self.bf16_lora
-            cur_scale = self.bf16_lora_scale
-            cur_extra_lora = self.bf16_extra_lora
-            cur_extra_lora_scale = self.bf16_extra_lora_scale
-
-            self.bf16_lora = loading
-            self.bf16_extra_lora = loading
-
-        if lora_weights:
-            # since we merge weights, need to reload for change in scale. auto-reloading for extra weights
-            if (
-                lora_weights != cur_lora
-                or lora_scale != cur_scale
-                or extra_lora_weights != cur_extra_lora
-                or extra_lora_scale != cur_extra_lora_scale
-            ):
-                if cur_lora or cur_extra_lora:
-                    unload_loras(model)
-                lora_path = self.weights_cache.ensure(lora_weights)
-                if extra_lora_weights:
-                    extra_lora_path = self.weights_cache.ensure(extra_lora_weights)
-                    load_loras(
-                        model,
-                        [lora_path, extra_lora_path],
-                        [lora_scale, extra_lora_scale],
-                    )
-                else:
-                    load_lora(model, lora_path, lora_scale)
-            else:
-                print(f"Lora {lora_weights} already loaded")
-                if extra_lora_weights:
-                    print(f"Extra lora {extra_lora_weights} already loaded")
-
-        elif cur_lora:
-            unload_loras(model)
-
-        if go_fast:
-            self.fp8_lora = lora_weights
-            self.fp8_lora_scale = lora_scale
-            self.fp8_extra_lora = extra_lora_weights
-            self.fp8_extra_lora_scale = extra_lora_scale
-
-        else:
-            self.bf16_lora = lora_weights
-            self.bf16_lora_scale = lora_scale
-            self.bf16_extra_lora = extra_lora_weights
-            self.bf16_extra_lora_scale = extra_lora_scale
 
     def size_from_aspect_megapixels(
         self, aspect_ratio: str, megapixels: str = "1"
@@ -454,161 +229,6 @@ class Predictor(BasePredictor):
             width, height = width // 2, height // 2
 
         return (width, height)
-
-    # TODO(andreas): This is getting messy, with bf16_predict, shared_predict,
-    # and lots of model-specific switching. Refactor.
-    @torch.inference_mode()
-    def bf16_predict(
-        self,
-        prompt: str,
-        num_outputs: int,
-        num_inference_steps: int,
-        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
-        image_path: Path | None = None,  # img2img for flux-dev
-        mask_path: Path | None = None,  # mask for flux-dev-fill
-        prompt_strength: float = 0.8,
-        seed: int | None = None,
-        width: int = 1024,
-        height: int = 1024,
-        legacy_mask_path: Path = None,  # inpainting for hotswap
-        control_image_embedder: ImageEncoder | None = None,
-    ) -> tuple[List[Image.Image], List[np.ndarray]]:
-        """Run a single prediction on the model"""
-        torch_device = torch.device("cuda")
-        init_image = None
-        img_cond = None
-
-        if not seed:
-            seed = int.from_bytes(os.urandom(2), "big")
-        print(f"Using seed: {seed}")
-
-        if mask_path:
-            assert image_path is not None
-            img_cond = self.prepare_img_cond(
-                image_path, mask_path, width=width, height=height
-            )
-
-        elif control_image_embedder is not None:
-            img_cond = self.prepare_control(
-                image_path=image_path,
-                image_embedder=control_image_embedder,
-                width=width,
-                height=height,
-            )
-
-        # img2img
-        elif image_path is not None:
-            # For backwards compatibility, we still preserve width and
-            # height for init_images, as opposed to using megapixels
-            # with a "match_input" value.
-            init_image, width, height = self.prepare_init_image(image_path)
-
-        # prepare input
-        x = get_noise(
-            num_outputs,
-            height,
-            width,
-            device=torch_device,
-            dtype=torch.bfloat16,
-            seed=seed,
-        )
-        timesteps = get_schedule(
-            num_inference_steps,
-            # equivalent to inp["img"].shape[1], needs to be here for prompt strength in img2img
-            (x.shape[-1] * x.shape[-2]) // 4,
-            shift=self.shift,
-        )
-
-        if init_image is not None:
-            t_idx = int((1.0 - prompt_strength) * num_inference_steps)
-            t = timesteps[t_idx]
-            timesteps = timesteps[t_idx:]
-            x = t * x + (1.0 - t) * init_image.to(x.dtype)
-
-        if self.offload:
-            self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
-
-        inp = self.prepare(x, [prompt] * num_outputs)
-
-        if img_cond is not None:
-            inp["img_cond"] = img_cond
-
-        if legacy_mask_path:
-            assert init_image is not None, "Init image is not set when mask is set"
-            inp["mask"], inp["noise"], inp["image_latents"] = self.prepare_legacy_mask(
-                mask_path=legacy_mask_path,
-                init_image=init_image,
-                noise=x,
-                width=width,
-                height=height,
-            )
-
-        if self.offload:
-            self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
-            torch.cuda.empty_cache()
-            self.flux = self.flux.to(torch_device)
-            
-        x, flux = denoise(
-            self.flux,
-            **inp,
-            timesteps=timesteps,
-            guidance=guidance,
-            compile_run=self.compile_run,
-        )
-
-        if self.compile_run:
-            self.compile_run = False
-            self.flux = flux
-
-        if self.offload:
-            self.flux.cpu()
-            torch.cuda.empty_cache()
-            self.ae.decoder.to(x.device)
-
-        x = unpack(x.float(), height, width)
-        with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
-            x = self.ae.decode(x)
-
-        if self.offload:
-            self.ae.decoder.cpu()
-            torch.cuda.empty_cache()
-
-        np_images = [
-            (127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0))
-            .cpu()
-            .byte()
-            .numpy()
-            for i in range(num_outputs)
-        ]
-        images = [Image.fromarray(img) for img in np_images]
-        return images, np_images
-
-    def fp8_predict(
-        self,
-        prompt: str,
-        num_outputs: int,
-        num_inference_steps: int,
-        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
-        image: Path | None = None,  # img2img for flux-dev
-        prompt_strength: float = 0.8,
-        seed: int | None = None,
-        width: int = 1024,
-        height: int = 1024,
-    ) -> tuple[List[Image.Image], List[np.ndarray]]:
-        """Run a single prediction on the model"""
-        print("running quantized prediction")
-
-        return self.fp8_pipe.generate(
-            prompt=prompt,
-            width=width,
-            height=height,
-            num_steps=num_inference_steps,
-            guidance=guidance,
-            seed=seed,
-            init_image=image,
-            strength=prompt_strength,
-            num_images=num_outputs,
-        )
 
     def postprocess(
         self,
@@ -672,128 +292,6 @@ class Predictor(BasePredictor):
 
         return result == "normal"
 
-    def shared_predict(
-        self,
-        go_fast: bool,
-        prompt: str,
-        num_outputs: int,
-        num_inference_steps: int,
-        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
-        image: Path | None = None,  # img2img for flux-dev
-        mask: Path | None = None,  # for flux-dev-fill
-        prompt_strength: float = 0.8,
-        seed: int | None = None,
-        width: int = 1024,
-        height: int = 1024,
-        control_image_embedder: ImageEncoder | None = None,
-        legacy_mask_path: Path | None = None,
-    ) -> tuple[List[Image.Image], List[np.ndarray]]:
-        if go_fast and not self.disable_fp8:
-            assert image is None
-            assert mask is None
-
-            return self.fp8_predict(
-                prompt=prompt,
-                num_outputs=num_outputs,
-                num_inference_steps=num_inference_steps,
-                guidance=guidance,
-                image=image,
-                prompt_strength=prompt_strength,
-                seed=seed,
-                width=width,
-                height=height,
-            )
-        if self.disable_fp8:
-            print("running bf16 model, fp8 disabled")
-        return self.bf16_predict(
-            prompt=prompt,
-            num_outputs=num_outputs,
-            num_inference_steps=num_inference_steps,
-            guidance=guidance,
-            image_path=image,
-            mask_path=mask,
-            prompt_strength=prompt_strength,
-            seed=seed,
-            width=width,
-            height=height,
-            legacy_mask_path=legacy_mask_path,
-            control_image_embedder=control_image_embedder,
-        )
-
-    def prepare_init_image(self, image_path: Path) -> tuple[torch.Tensor, int, int]:
-        torch_device = torch.device("cuda")
-
-        print("Image detected - setting to img2img mode")
-        init_image = load_image_tensor(image_path).to(torch_device)
-        init_image, width, height = maybe_scale_to_closest_multiple(
-            init_image, multiple=16
-        )
-
-        with self.maybe_offload_ae():
-            init_image = self.ae.encode(init_image)
-
-        return init_image, width, height
-
-    def prepare_control(
-        self,
-        image_path: Path,
-        image_embedder: ImageEncoder,
-        width: int,
-        height: int,
-    ) -> torch.Tensor:
-        image_pil = load_image(image_path)
-        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height)
-
-        with torch.no_grad():
-            img_cond = image_embedder(image)
-            with self.maybe_offload_ae():
-                img_cond = self.ae.encode(img_cond)
-
-        img_cond = img_cond.to(torch.bfloat16)
-        return rearrange(img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-
-    def prepare_img_cond(
-        self,
-        image_path: Path,
-        mask_path: Path,
-        width: int,
-        height: int,
-    ) -> torch.Tensor:
-        torch_device = torch.device("cuda")
-
-        image_pil = load_image(image_path)
-        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height).to(
-            torch_device
-        )
-        mask_pil = load_image(mask_path, grayscale=True)
-        mask = maybe_scale_to_size_and_convert_to_tensor(
-            mask_pil, width, height, grayscale=True
-        ).to(torch_device)
-
-        # TODO(andreas): support image inputs with alpha channels
-        with torch.no_grad():
-            img_cond = image
-            img_cond = img_cond * (1 - mask)
-
-            with self.maybe_offload_ae():
-                img_cond = self.ae.encode(img_cond)
-
-            mask = mask[:, 0, :, :]
-            mask = mask.to(torch.bfloat16)
-            mask = rearrange(
-                mask,
-                "b (h ph) (w pw) -> b (ph pw) h w",
-                ph=8,
-                pw=8,
-            )
-            mask = rearrange(mask, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-
-        img_cond = img_cond.to(torch.bfloat16)
-        img_cond = rearrange(
-            img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2
-        )
-        return torch.cat((img_cond, mask), dim=-1)
-
     def size_maybe_match_input(
         self, image_path: Path, megapixels: str
     ) -> tuple[int, int]:
@@ -821,21 +319,18 @@ class Predictor(BasePredictor):
 
         return round_to_nearest_multiple_of_32(width, height)
 
-    @contextmanager
-    def maybe_offload_ae(self):
-        if self.offload:
-            self.ae.encoder.to(torch.device("cuda"))
-        try:
-            yield
-        finally:
-            if self.offload:
-                self.ae = self.ae.cpu()
-                torch.cuda.empty_cache()
-
 
 class SchnellPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup(FLUX_SCHNELL, compile_fp8=True)
+        self.base_setup()
+        self.bf16_model = BflBf16Predictor(FLUX_SCHNELL, offload=self.should_offload())
+        self.fp8_model = BflFp8Predictor(
+            FLUX_SCHNELL,
+            loaded_models=self.bf16_model.get_shared_models(),
+            compile=True,
+            compilation_aspect_ratios=ASPECT_RATIOS,
+            offload=self.should_offload(),
+        )
 
     def predict(
         self,
@@ -852,9 +347,10 @@ class SchnellPredictor(Predictor):
         go_fast: bool = Inputs.go_fast_with_default(True),
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
+        model = self.fp8_model if go_fast else self.bf16_model
+
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
+        imgs, np_imgs = model.predict(
             prompt,
             num_outputs,
             num_inference_steps=num_inference_steps,
@@ -874,7 +370,15 @@ class SchnellPredictor(Predictor):
 
 class DevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup(FLUX_DEV, compile_fp8=True)
+        self.base_setup()
+        self.bf16_model = BflBf16Predictor(FLUX_DEV, offload=self.should_offload())
+        self.fp8_model = BflFp8Predictor(
+            FLUX_DEV,
+            loaded_models=self.bf16_model.get_shared_models(),
+            compile=True,
+            compilation_aspect_ratios=ASPECT_RATIOS,
+            offload=self.should_offload(),
+        )
 
     def predict(
         self,
@@ -906,8 +410,8 @@ class DevPredictor(Predictor):
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
+        model = self.fp8_model if go_fast else self.bf16_model
+        imgs, np_imgs = model.predict(
             prompt,
             num_outputs,
             num_inference_steps,
@@ -930,8 +434,19 @@ class DevPredictor(Predictor):
 
 class SchnellLoraPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup(FLUX_SCHNELL, compile_fp8=True)
-        self.lora_setup()
+        self.base_setup()
+        cache = WeightsDownloadCache()
+        self.bf16_model = BflBf16Predictor(
+            FLUX_SCHNELL, offload=self.should_offload(), weights_download_cache=cache
+        )
+        self.fp8_model = BflFp8Predictor(
+            FLUX_SCHNELL,
+            loaded_models=self.bf16_model.get_shared_models(),
+            compile=True,
+            compilation_aspect_ratios=ASPECT_RATIOS,
+            offload=self.should_offload(),
+            weights_download_cache=cache,
+        )
 
     def predict(
         self,
@@ -950,11 +465,11 @@ class SchnellLoraPredictor(Predictor):
         lora_scale: float = Inputs.lora_scale,
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
-        self.handle_loras(go_fast, lora_weights, lora_scale)
+        model = self.fp8_model if go_fast else self.bf16_model
+        model.handle_loras(lora_weights, lora_scale)
 
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
+        imgs, np_imgs = model.predict(
             prompt,
             num_outputs,
             num_inference_steps=num_inference_steps,
@@ -973,9 +488,20 @@ class SchnellLoraPredictor(Predictor):
 
 
 class DevLoraPredictor(Predictor):
-    def setup(self, t5=None, clip=None, ae=None) -> None:
-        self.base_setup(FLUX_DEV, compile_fp8=True, t5=t5, clip=clip, ae=ae)
-        self.lora_setup()
+    def setup(self) -> None:
+        self.base_setup()
+        cache = WeightsDownloadCache()
+        self.bf16_model = BflBf16Predictor(
+            FLUX_DEV, offload=self.should_offload(), weights_download_cache=cache
+        )
+        self.fp8_model = BflFp8Predictor(
+            FLUX_DEV,
+            loaded_models=self.bf16_model.get_shared_models(),
+            compile=True,
+            compilation_aspect_ratios=ASPECT_RATIOS,
+            offload=self.should_offload(),
+            weights_download_cache=cache,
+        )
 
     def predict(
         self,
@@ -1009,11 +535,11 @@ class DevLoraPredictor(Predictor):
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
 
-        self.handle_loras(go_fast, lora_weights, lora_scale)
+        model = self.fp8_model if go_fast else self.bf16_model
+        model.handle_loras(lora_weights, lora_scale)
 
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
+        imgs, np_imgs = model.predict(
             prompt,
             num_outputs,
             num_inference_steps,
@@ -1033,7 +559,7 @@ class DevLoraPredictor(Predictor):
             np_images=np_imgs,
         )
 
-
+# TODO(dan): finish refactor
 class _ReduxPredictor(Predictor):
     def redux_setup(self):
         self.redux_image_encoder = load_redux(device="cuda")
@@ -1052,7 +578,7 @@ class _ReduxPredictor(Predictor):
             img_cond_path=self.cur_prediction_redux_img,  # type: ignore
         )
 
-
+# TODO(dan): finish refactor
 class SchnellReduxPredictor(_ReduxPredictor):
     def setup(self):
         self.base_setup("flux-schnell", compile_fp8=False)
@@ -1102,7 +628,7 @@ class SchnellReduxPredictor(_ReduxPredictor):
             np_images=np_imgs,
         )
 
-
+# TODO(dan): refactor
 class DevReduxPredictor(_ReduxPredictor):
     def setup(self):
         self.base_setup("flux-dev", compile_fp8=False)
@@ -1159,7 +685,9 @@ class DevReduxPredictor(_ReduxPredictor):
 
 class FillDevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-fill-dev", disable_fp8=True)
+        self.base_setup()
+        cache = WeightsDownloadCache()
+        self.model = BflBf16Predictor("flux-fill-dev", offload=self.should_offload(), weights_download_cache=cache)
 
     def predict(
         self,
@@ -1181,14 +709,12 @@ class FillDevPredictor(Predictor):
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
-        # go_fast: bool = Inputs.go_fast,
     ) -> List[Path]:
         # TODO(andreas): This means we're reading the image twice
         # which is a bit inefficient.
         width, height = self.size_maybe_match_input(image, megapixels)
 
-        imgs, np_imgs = self.shared_predict(
-            go_fast=False,
+        imgs, np_imgs = self.model.predict(
             prompt=prompt,
             num_outputs=num_outputs,
             num_inference_steps=num_inference_steps,
@@ -1207,14 +733,9 @@ class FillDevPredictor(Predictor):
             np_images=np_imgs,
         )
 
-
+# TODO(dan): finish refactor
 class HotswapPredictor(BasePredictor):
     def setup(self) -> None:
-        self.schnell_fp8 = 
-        self.schnell_bf16 = 
-        self.dev_fp8 = 
-        self.dev_bf16 = 
-        
         self.schnell_lora = SchnellLoraPredictor()
         self.schnell_lora.setup()
 
@@ -1344,7 +865,7 @@ class HotswapPredictor(BasePredictor):
             np_images=np_imgs,
         )
 
-
+# TODO(dan): finish refactor
 class CannyDevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-canny-dev", disable_fp8=True)
@@ -1391,7 +912,7 @@ class CannyDevPredictor(Predictor):
             np_images=np_imgs,
         )
 
-
+# TODO(dan): finish refactor
 class DepthDevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup("flux-depth-dev", disable_fp8=True)
@@ -1445,93 +966,3 @@ class TestPredictor(Predictor):
 
     def predict(self, how_many: int = Input(description="how many", ge=0)) -> Any:
         return self.num + how_many
-
-
-def load_image_tensor(image_path: Path) -> Tensor:
-    image = Image.open(image_path).convert("RGB")
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: 2.0 * x - 1.0),
-        ]
-    )
-    img: Tensor = transform(image)  # type: ignore
-    return img[None, ...]
-
-
-def maybe_scale_to_closest_multiple(
-    image: Tensor, multiple: int
-) -> tuple[Tensor, int, int]:
-    width = image.shape[-1]
-    height = image.shape[-2]
-    print(f"Input image size: {width}x{height}")
-
-    # Calculate the scaling factor if the image exceeds MAX_IMAGE_SIZE
-    scale = min(MAX_IMAGE_SIZE / width, MAX_IMAGE_SIZE / height, 1)
-    if scale < 1:
-        width = int(width * scale)
-        height = int(height * scale)
-        print(f"Scaling image down to {width}x{height}")
-
-    # Round image width and height to nearest multiple of 16
-    width = round(width / multiple) * multiple
-    height = round(height / multiple) * multiple
-    print(f"Input image size set to: {width}x{height}")
-
-    # Resize
-    image = torch.nn.functional.interpolate(image, (height, width))
-
-    return image, width, height
-
-
-def load_image(image_path: Path, grayscale: bool = False) -> Image.Image:
-    return Image.open(image_path).convert("L" if grayscale else "RGB")
-
-
-def maybe_scale_to_size_and_convert_to_tensor(
-    image: Image.Image, width: int, height: int, grayscale: bool = False
-) -> Tensor:
-    if grayscale:
-        transform = transforms.ToTensor()
-    else:
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Lambda(lambda x: 2.0 * x - 1.0),
-            ]
-        )
-
-    if image.size == (width, height):
-        return transform(image)[None, ...]  # type: ignore
-
-    # Resize with Lanczos
-    resized = image.resize((width, height), Image.Resampling.LANCZOS)
-    return transform(resized)[None, ...]  # type: ignore
-
-
-def maybe_crop_to_size_and_convert_to_tensor(
-    image: Image.Image, width: int, height: int, grayscale: bool = False
-) -> Tensor:
-    if grayscale:
-        transform = transforms.ToTensor()
-    else:
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Lambda(lambda x: 2.0 * x - 1.0),
-            ]
-        )
-
-    if image.size == (width, height):
-        return transform(image)[None, ...]  # type: ignore
-
-    # Calculate crop box for center crop
-    img_width, img_height = image.size
-    left = (img_width - width) // 2
-    top = (img_height - height) // 2
-    right = left + width
-    bottom = top + height
-
-    # Center crop
-    cropped = image.crop((left, top, right, bottom))
-    return transform(cropped)[None, ...]  # type: ignore
