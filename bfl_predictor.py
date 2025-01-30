@@ -6,15 +6,29 @@ from typing import List, Tuple
 from einops import rearrange
 
 from cog import Path
-from flux.modules.image_embedders import ImageEncoder
-from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
+from flux.modules.image_embedders import CannyImageEncoder
+from flux.sampling import (
+    denoise,
+    get_noise,
+    get_schedule,
+    prepare,
+    prepare_redux,
+    unpack,
+)
 import torch
 from torch import Tensor
 from torchvision import transforms
 from PIL import Image
 import numpy as np
 
-from flux.util import load_ae, load_clip, load_flow_model, load_t5
+from flux.util import (
+    load_ae,
+    load_clip,
+    load_depth_encoder,
+    load_flow_model,
+    load_redux,
+    load_t5,
+)
 from fp8.flux_pipeline import FluxPipeline
 from fp8.lora_loading import load_lora, load_loras, unload_loras
 from fp8.util import LoadedModels
@@ -165,66 +179,6 @@ class BflBf16Predictor(LoraMixin):
 
         return init_image, width, height
 
-    def prepare_img_cond(
-        self,
-        image_path: Path,
-        mask_path: Path,
-        width: int,
-        height: int,
-    ) -> torch.Tensor:
-        torch_device = torch.device("cuda")
-
-        image_pil = load_image(image_path)
-        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height).to(
-            torch_device
-        )
-        mask_pil = load_image(mask_path, grayscale=True)
-        mask = maybe_scale_to_size_and_convert_to_tensor(
-            mask_pil, width, height, grayscale=True
-        ).to(torch_device)
-
-        # TODO(andreas): support image inputs with alpha channels
-        with torch.no_grad():
-            img_cond = image
-            img_cond = img_cond * (1 - mask)
-
-            with self.maybe_offload_ae():
-                img_cond = self.ae.encode(img_cond)
-
-            mask = mask[:, 0, :, :]
-            mask = mask.to(torch.bfloat16)
-            mask = rearrange(
-                mask,
-                "b (h ph) (w pw) -> b (ph pw) h w",
-                ph=8,
-                pw=8,
-            )
-            mask = rearrange(mask, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-
-        img_cond = img_cond.to(torch.bfloat16)
-        img_cond = rearrange(
-            img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2
-        )
-        return torch.cat((img_cond, mask), dim=-1)
-
-    def prepare_control(
-        self,
-        image_path: Path,
-        image_embedder: ImageEncoder,
-        width: int,
-        height: int,
-    ) -> torch.Tensor:
-        image_pil = load_image(image_path)
-        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height)
-
-        with torch.no_grad():
-            img_cond = image_embedder(image)
-            with self.maybe_offload_ae():
-                img_cond = self.ae.encode(img_cond)
-
-        img_cond = img_cond.to(torch.bfloat16)
-        return rearrange(img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-
     def prepare_legacy_mask(
         self,
         mask_path: Path,
@@ -258,6 +212,9 @@ class BflBf16Predictor(LoraMixin):
 
         return mask, noise, image_latents
 
+    def prepare_conditioning(self):
+        return None
+
     @torch.inference_mode()
     def predict(
         self,
@@ -265,46 +222,38 @@ class BflBf16Predictor(LoraMixin):
         num_outputs: int,
         num_inference_steps: int,
         guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
-        image_path: Path | None = None,  # img2img for flux-dev
-        mask_path: Path | None = None,  # mask for flux-dev-fill
         prompt_strength: float = 0.8,
         seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
+        legacy_image_path: Path | None = None,  # img2img for flux-dev
         legacy_mask_path: Path = None,  # inpainting for hotswap
-        control_image_embedder: ImageEncoder | None = None,
+        conditioning_kwargs: dict = {},
+        prepare_kwargs: dict = {},
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
         init_image = None
         img_cond = None
 
+        # invariable
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
 
-        if mask_path:
-            assert image_path is not None
-            img_cond = self.prepare_img_cond(
-                image_path, mask_path, width=width, height=height
+        if conditioning_kwargs:
+            img_cond = self.prepare_conditioning(
+                height=height, width=width, **conditioning_kwargs
             )
 
-        elif control_image_embedder is not None:
-            img_cond = self.prepare_control(
-                image_path=image_path,
-                image_embedder=control_image_embedder,
-                width=width,
-                height=height,
-            )
-
-        # img2img
-        elif image_path is not None:
+        # dev & hotswap
+        if legacy_image_path is not None and img_cond is None:
             # For backwards compatibility, we still preserve width and
             # height for init_images, as opposed to using megapixels
             # with a "match_input" value.
-            init_image, width, height = self.prepare_init_image(image_path)
+            init_image, width, height = self.prepare_init_image(legacy_image_path)
 
-        # prepare input
+        # invariable
         x = get_noise(
             num_outputs,
             height,
@@ -319,7 +268,7 @@ class BflBf16Predictor(LoraMixin):
             (x.shape[-1] * x.shape[-2]) // 4,
             shift=self.shift,
         )
-
+        # dev & hotswap
         if init_image is not None:
             t_idx = int((1.0 - prompt_strength) * num_inference_steps)
             t = timesteps[t_idx]
@@ -329,11 +278,13 @@ class BflBf16Predictor(LoraMixin):
         if self.offload:
             self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
 
-        inp = self.prepare(x, [prompt] * num_outputs)
+        inp = self.prepare(x, [prompt] * num_outputs, **prepare_kwargs)
 
+        # fill/controlnets
         if img_cond is not None:
             inp["img_cond"] = img_cond
 
+        # Hotswap
         if legacy_mask_path:
             assert init_image is not None, "Init image is not set when mask is set"
             inp["mask"], inp["noise"], inp["image_latents"] = self.prepare_legacy_mask(
@@ -383,6 +334,130 @@ class BflBf16Predictor(LoraMixin):
         ]
         images = [Image.fromarray(img) for img in np_images]
         return images, np_images
+
+
+class BflReduxPredictor(BflBf16Predictor):
+    """
+    To use, pass redux_img_path into predict as a kwarg
+    Not ideal, least unpleasant way I've found to unpack this.
+    """
+
+    def __init__(
+        self,
+        flow_model_name: str,
+        loaded_models: LoadedModels | None,
+        device: str = "cuda",
+        offload: bool = False,
+        weights_download_cache: WeightsDownloadCache | None = None,
+    ):
+        super().__init__(
+            flow_model_name,
+            loaded_models,
+            device=device,
+            offload=offload,
+            weights_download_cache=weights_download_cache,
+        )
+        self.redux_image_encoder = load_redux(device="cuda")
+
+    def prepare(self, x, prompt, redux_img_path=None):
+        return prepare_redux(
+            self.t5,
+            self.clip,
+            x,
+            prompt=prompt,
+            encoder=self.redux_image_encoder,
+            img_cond_path=redux_img_path,
+        )
+
+
+class BflFillFlux(BflBf16Predictor):
+    def prepare_conditioning(
+        self,
+        image_path: Path,
+        mask_path: Path,
+        width: int,
+        height: int,
+    ) -> torch.Tensor:
+        torch_device = torch.device("cuda")
+
+        image_pil = load_image(image_path)
+        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height).to(
+            torch_device
+        )
+        mask_pil = load_image(mask_path, grayscale=True)
+        mask = maybe_scale_to_size_and_convert_to_tensor(
+            mask_pil, width, height, grayscale=True
+        ).to(torch_device)
+
+        # TODO(andreas): support image inputs with alpha channels
+        with torch.no_grad():
+            img_cond = image
+            img_cond = img_cond * (1 - mask)
+
+            with self.maybe_offload_ae():
+                img_cond = self.ae.encode(img_cond)
+
+            mask = mask[:, 0, :, :]
+            mask = mask.to(torch.bfloat16)
+            mask = rearrange(
+                mask,
+                "b (h ph) (w pw) -> b (ph pw) h w",
+                ph=8,
+                pw=8,
+            )
+            mask = rearrange(mask, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
+
+        img_cond = img_cond.to(torch.bfloat16)
+        img_cond = rearrange(
+            img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2
+        )
+        return torch.cat((img_cond, mask), dim=-1)
+
+
+class BflControlNetFlux(BflBf16Predictor):
+    """
+    To use, pass proper conditioning kwargs into predict.
+    Not ideal, least unpleasant way I've found to unpack this.
+    """
+
+    def __init__(
+        self,
+        flow_model_name: str,
+        loaded_models: LoadedModels | None,
+        device: str = "cuda",
+        offload: bool = False,
+        weights_download_cache: WeightsDownloadCache | None = None,
+    ):
+        super().__init__(
+            flow_model_name,
+            loaded_models,
+            device=device,
+            offload=offload,
+            weights_download_cache=weights_download_cache,
+        )
+        if self.flow_model_name == "flux-depth-dev":
+            self.control_image_embedder = load_depth_encoder("cuda")
+        elif self.flow_model_name == "flux-canny-dev":
+            self.control_image_embedder = CannyImageEncoder(torch.device("cuda"))
+        else:
+            raise ValueError(f"flux model {flow_model_name} is not a controlnet model")
+
+    def prepare_conditioning(
+        self,
+        image_path: Path,
+        width: int,
+        height: int,
+    ) -> torch.Tensor:
+        image_pil = load_image(image_path)
+        image = maybe_scale_to_size_and_convert_to_tensor(image_pil, width, height)
+
+        with torch.no_grad():
+            img_cond = self.control_image_embedder(image)
+            with self.maybe_offload_ae():
+                img_cond = self.ae.encode(img_cond)
+
+        img_cond = img_cond.to(torch.bfloat16)
+        return rearrange(img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
 
 
 class BflFp8Predictor(LoraMixin):

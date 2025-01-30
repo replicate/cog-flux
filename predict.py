@@ -1,12 +1,16 @@
-from contextlib import contextmanager
+from abc import ABC, abstractmethod
 import os
-import time
 from typing import Any, Tuple
 
 import torch
-from torch import Tensor
 
-from bfl_predictor import BflBf16Predictor, BflFp8Predictor
+from bfl_predictor import (
+    BflBf16Predictor,
+    BflControlNetFlux,
+    BflFillFlux,
+    BflFp8Predictor,
+    BflReduxPredictor,
+)
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -17,36 +21,13 @@ import logging
 
 
 from dataclasses import dataclass
-from flux.sampling import (
-    denoise,
-    get_noise,
-    get_schedule,
-    prepare,
-    prepare_redux,
-    unpack,
-)
-from fp8.flux_pipeline import FluxPipeline
-from fp8.util import LoadedModels
-from fp8.lora_loading import load_lora, load_loras, unload_loras
 
 import numpy as np
-from einops import rearrange
 from PIL import Image
 from typing import List
-from torchvision import transforms
 from cog import BasePredictor, Input, Path  # type: ignore
 from flux.util import (
-    load_ae,
-    load_clip,
-    load_depth_encoder,
-    load_flow_model,
-    load_redux,
-    load_t5,
     download_weights,
-)
-from flux.modules.image_embedders import (
-    ImageEncoder,
-    CannyImageEncoder,
 )
 
 from diffusers.pipelines.stable_diffusion.safety_checker import (
@@ -173,12 +154,15 @@ class Inputs:
         )
 
 
-class Predictor(BasePredictor):
+class Predictor(BasePredictor, ABC):
+    """
+    honestly there's probably more refactoring to be done here; this should be a separate object and not an abstract base class.
+    it has no need to be a predictor.
+    but here we are for now.
+    """
+
     def setup(self) -> None:
         return
-
-    def lora_setup(self):
-        self.weights_cache = WeightsDownloadCache()
 
     def base_setup(
         self,
@@ -217,9 +201,9 @@ class Predictor(BasePredictor):
             print("GPU memory is:", total_mem / 1024**3, ", offloading models")
         return self.offload
 
-    # TODO(andreas): make this an abstract class
+    @abstractmethod
     def predict(self):
-        raise Exception("You need to instantiate a predictor for a specific flux model")
+        pass
 
     def size_from_aspect_megapixels(
         self, aspect_ratio: str, megapixels: str = "1"
@@ -416,7 +400,7 @@ class DevPredictor(Predictor):
             num_outputs,
             num_inference_steps,
             guidance=guidance,
-            image=image,
+            legacy_image_path=image,
             prompt_strength=prompt_strength,
             seed=seed,
             width=width,
@@ -544,7 +528,7 @@ class DevLoraPredictor(Predictor):
             num_outputs,
             num_inference_steps,
             guidance=guidance,
-            image=image,
+            legacy_image_path=image,
             prompt_strength=prompt_strength,
             seed=seed,
             width=width,
@@ -559,30 +543,11 @@ class DevLoraPredictor(Predictor):
             np_images=np_imgs,
         )
 
-# TODO(dan): finish refactor
-class _ReduxPredictor(Predictor):
-    def redux_setup(self):
-        self.redux_image_encoder = load_redux(device="cuda")
-        self.cur_prediction_redux_img = None
-        # TODO: hopefully temporary
-        self.disable_fp8 = True
 
-    def prepare(self, x, prompt):
-        return prepare_redux(
-            self.t5,
-            self.clip,
-            x,
-            prompt=prompt,
-            encoder=self.redux_image_encoder,
-            # TODO(andreas): Refactor this so we don't have to ignore the type here
-            img_cond_path=self.cur_prediction_redux_img,  # type: ignore
-        )
-
-# TODO(dan): finish refactor
-class SchnellReduxPredictor(_ReduxPredictor):
+class SchnellReduxPredictor(Predictor):
     def setup(self):
-        self.base_setup("flux-schnell", compile_fp8=False)
-        self.redux_setup()
+        self.base_setup()
+        self.model = BflReduxPredictor(FLUX_SCHNELL, offload=self.should_offload())
 
     def predict(
         self,
@@ -603,21 +568,17 @@ class SchnellReduxPredictor(_ReduxPredictor):
         disable_safety_checker: bool = Inputs.disable_safety_checker,
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
-        go_fast = False
         prompt = ""
 
-        # TODO: don't love passing this via a class variable, but it's better than totally breaking our abstractions.
-        self.cur_prediction_redux_img = redux_image
-
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
+        imgs, np_imgs = self.model.predict(
             prompt,
             num_outputs,
             num_inference_steps=num_inference_steps,
             seed=seed,
             width=width,
             height=height,
+            prepare_kwargs={"redux_img_path": redux_image},
         )
 
         return self.postprocess(
@@ -628,11 +589,11 @@ class SchnellReduxPredictor(_ReduxPredictor):
             np_images=np_imgs,
         )
 
-# TODO(dan): refactor
-class DevReduxPredictor(_ReduxPredictor):
+
+class DevReduxPredictor(Predictor):
     def setup(self):
-        self.base_setup("flux-dev", compile_fp8=False)
-        self.redux_setup()
+        self.base_setup()
+        self.model = BflReduxPredictor(FLUX_DEV, offload=self.should_offload())
 
     def predict(
         self,
@@ -656,15 +617,10 @@ class DevReduxPredictor(_ReduxPredictor):
         disable_safety_checker: bool = Inputs.disable_safety_checker,
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
-        go_fast = False
         prompt = ""
 
-        # TODO: don't love passing this via a class variable, but it's better than totally breaking our abstractions.
-        self.cur_prediction_redux_img = redux_image
-
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        imgs, np_imgs = self.shared_predict(
-            go_fast,
+        imgs, np_imgs = self.model.predict(
             prompt,
             num_outputs,
             num_inference_steps=num_inference_steps,
@@ -672,6 +628,7 @@ class DevReduxPredictor(_ReduxPredictor):
             seed=seed,
             width=width,
             height=height,
+            prepare_kwargs={"redux_img_path": redux_image},
         )
 
         return self.postprocess(
@@ -687,7 +644,9 @@ class FillDevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup()
         cache = WeightsDownloadCache()
-        self.model = BflBf16Predictor("flux-fill-dev", offload=self.should_offload(), weights_download_cache=cache)
+        self.model = BflFillFlux(
+            "flux-fill-dev", offload=self.should_offload(), weights_download_cache=cache
+        )
 
     def predict(
         self,
@@ -719,11 +678,10 @@ class FillDevPredictor(Predictor):
             num_outputs=num_outputs,
             num_inference_steps=num_inference_steps,
             guidance=guidance,
-            image=image,
-            mask=mask,
             seed=seed,
             width=width,
             height=height,
+            conditioning_kwargs={"image_path": image, "mask_path": mask},
         )
         return self.postprocess(
             imgs,
@@ -732,6 +690,7 @@ class FillDevPredictor(Predictor):
             output_quality,
             np_images=np_imgs,
         )
+
 
 # TODO(dan): finish refactor
 class HotswapPredictor(BasePredictor):
@@ -865,11 +824,11 @@ class HotswapPredictor(BasePredictor):
             np_images=np_imgs,
         )
 
-# TODO(dan): finish refactor
+
 class CannyDevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-canny-dev", disable_fp8=True)
-        self.control_image_embedder = CannyImageEncoder(torch.device("cuda"))
+        self.base_setup()
+        self.model = BflControlNetFlux("flux-canny-dev", offload=self.should_offload())
 
     def predict(
         self,
@@ -892,8 +851,7 @@ class CannyDevPredictor(Predictor):
         # which is a bit inefficient.
         width, height = self.size_maybe_match_input(control_image, megapixels)
 
-        imgs, np_imgs = self.shared_predict(
-            go_fast=False,
+        imgs, np_imgs = self.model.predict(
             prompt=prompt,
             num_outputs=num_outputs,
             num_inference_steps=num_inference_steps,
@@ -901,8 +859,7 @@ class CannyDevPredictor(Predictor):
             seed=seed,
             width=width,
             height=height,
-            image=control_image,
-            control_image_embedder=self.control_image_embedder,
+            conditioning_kwargs={"image_path": control_image},
         )
         return self.postprocess(
             imgs,
@@ -912,11 +869,11 @@ class CannyDevPredictor(Predictor):
             np_images=np_imgs,
         )
 
-# TODO(dan): finish refactor
+
 class DepthDevPredictor(Predictor):
     def setup(self) -> None:
-        self.base_setup("flux-depth-dev", disable_fp8=True)
-        self.control_image_embedder = load_depth_encoder("cuda")
+        self.base_setup()
+        self.model = BflControlNetFlux("flux-depth-dev", offload=self.should_offload())
 
     def predict(
         self,
@@ -939,8 +896,7 @@ class DepthDevPredictor(Predictor):
         # which is a bit inefficient.
         width, height = self.size_maybe_match_input(control_image, megapixels)
 
-        imgs, np_imgs = self.shared_predict(
-            go_fast=False,
+        imgs, np_imgs = self.model.predict(
             prompt=prompt,
             num_outputs=num_outputs,
             num_inference_steps=num_inference_steps,
@@ -948,8 +904,7 @@ class DepthDevPredictor(Predictor):
             seed=seed,
             width=width,
             height=height,
-            image=control_image,
-            control_image_embedder=self.control_image_embedder,
+            conditioning_kwargs={"image_path": control_image},
         )
         return self.postprocess(
             imgs,
