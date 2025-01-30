@@ -167,8 +167,6 @@ class Predictor(BasePredictor, ABC):
     def base_setup(
         self,
     ) -> None:
-        print(f"Booting model {self.flow_model_name}")
-
         gpu_name = (
             os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits")
             .read()

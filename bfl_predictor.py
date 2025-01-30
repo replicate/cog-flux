@@ -122,7 +122,7 @@ class BflBf16Predictor(LoraMixin):
     def __init__(
         self,
         flow_model_name: str,
-        loaded_models: LoadedModels | None,
+        loaded_models: LoadedModels | None = None,
         device: str = "cuda",
         offload: bool = False,
         weights_download_cache: WeightsDownloadCache | None = None,
@@ -145,12 +145,12 @@ class BflBf16Predictor(LoraMixin):
         self.clip = (
             loaded_models.clip
             if loaded_models and loaded_models.clip
-            else load_clip(device, max_length=max_length)
+            else load_clip(device)
         )
         self.ae = (
             loaded_models.ae
             if loaded_models and loaded_models.ae
-            else load_ae(device, max_length=max_length)
+            else load_ae(self.flow_model_name, device="cpu" if self.offload else device)
         )
         self.model = load_flow_model(
             self.flow_model_name, device="cpu" if self.offload else device
@@ -514,6 +514,7 @@ class BflFp8Predictor(LoraMixin):
             shared_models=loaded_models,
             **extra_args,  # type: ignore
         )
+        self.num_steps = 4 if "schnell" in flow_model_name else 28
 
         # hack to expose this to lora loading
         self.model = self.fp8_pipe.model
@@ -531,7 +532,7 @@ class BflFp8Predictor(LoraMixin):
                 compiling=True,
             )
 
-            for k, v in compilation_aspect_ratios:
+            for k, v in compilation_aspect_ratios.items():
                 print(f"warming kernel for {k}")
                 width, height = v
                 self.fp8_pipe.generate(
@@ -551,6 +552,33 @@ class BflFp8Predictor(LoraMixin):
 
             print("compiled in ", time.time() - st)
 
+    def predict(
+        self,
+        prompt: str,
+        num_outputs: int,
+        num_inference_steps: int,
+        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
+        image: Path | None = None,  # img2img for flux-dev
+        prompt_strength: float = 0.8,
+        seed: int | None = None,
+        width: int = 1024,
+        height: int = 1024,
+        **kwargs
+    ) -> tuple[List[Image.Image], List[np.ndarray]]:
+        """Run a single prediction on the model"""
+        print("running quantized prediction")
+
+        return self.fp8_pipe.generate(
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_steps=num_inference_steps,
+            guidance=guidance,
+            seed=seed,
+            init_image=image,
+            strength=prompt_strength,
+            num_images=num_outputs,
+        )
 
 ###
 # util functions
