@@ -311,7 +311,7 @@ class SchnellPredictor(Predictor):
         self.fp8_model = BflFp8Predictor(
             FLUX_SCHNELL,
             loaded_models=self.bf16_model.get_shared_models(),
-            compile=True,
+            torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
         )
@@ -359,7 +359,7 @@ class DevPredictor(Predictor):
         self.fp8_model = BflFp8Predictor(
             FLUX_DEV,
             loaded_models=self.bf16_model.get_shared_models(),
-            compile=True,
+            torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
         )
@@ -426,7 +426,7 @@ class SchnellLoraPredictor(Predictor):
         self.fp8_model = BflFp8Predictor(
             FLUX_SCHNELL,
             loaded_models=self.bf16_model.get_shared_models(),
-            compile=True,
+            torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
             weights_download_cache=cache,
@@ -481,7 +481,7 @@ class DevLoraPredictor(Predictor):
         self.fp8_model = BflFp8Predictor(
             FLUX_DEV,
             loaded_models=self.bf16_model.get_shared_models(),
-            compile=True,
+            torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
             weights_download_cache=cache,
@@ -645,7 +645,10 @@ class FillDevPredictor(Predictor):
         self.base_setup()
         cache = WeightsDownloadCache()
         self.model = BflFillFlux(
-            "flux-fill-dev", offload=self.should_offload(), weights_download_cache=cache
+            "flux-fill-dev",
+            offload=self.should_offload(),
+            weights_download_cache=cache,
+            restore_lora_from_cloned_weights=True,
         )
 
     def predict(
@@ -667,11 +670,15 @@ class FillDevPredictor(Predictor):
         megapixels: str = Inputs.megapixels_with_match_input,
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
+        lora_weights: str = Inputs.lora_weights,
+        lora_scale: float = Inputs.lora_scale,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
     ) -> List[Path]:
         # TODO(andreas): This means we're reading the image twice
         # which is a bit inefficient.
         width, height = self.size_maybe_match_input(image, megapixels)
+
+        self.model.handle_loras(lora_weights, lora_scale)
 
         imgs, np_imgs = self.model.predict(
             prompt=prompt,

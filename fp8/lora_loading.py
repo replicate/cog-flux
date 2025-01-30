@@ -22,6 +22,10 @@ class F8LinearClone:
         self.scale_reciprocal = module.scale_reciprocal
         self.input_scale_reciprocal = module.input_scale_reciprocal
 
+class LinearClone: 
+    def __init__(self, module):
+        self.weight = module.weight.data
+
 
 def swap_scale_shift(weight):
     scale, shift = weight.chunk(2, dim=0)
@@ -528,13 +532,13 @@ def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: lis
 
 
 @torch.inference_mode()
-def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0):
+def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store_clones: bool = False):
     t = time.time()
     has_guidance = model.params.guidance_embed
 
     lora_weights = convert_lora_weights(lora_path, has_guidance)
 
-    f8_clones = apply_lora_to_model(model, lora_weights, lora_scale)
+    apply_lora_to_model_and_optionally_store_clones(model, lora_weights, lora_scale, store_clones)
 
     logger.success(f"LoRA applied in {time.time() - t:.2}s")
 
@@ -543,15 +547,6 @@ def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0):
     else:
         model.lora_weights = [(lora_weights, lora_scale)]
 
-    if hasattr(model, "f8_clones") and f8_clones is not None and model.f8_clones is not None:
-        # for subsequent lora loads, we only add clones for new modules
-        for k in f8_clones.keys():
-            if k not in model.f8_clones:
-                model.f8_clones[k] = f8_clones[k]
-
-    else:
-        model.f8_clones = f8_clones
-
 
 @torch.inference_mode()
 def unload_loras(model: Flux):
@@ -559,18 +554,54 @@ def unload_loras(model: Flux):
     if not hasattr(model, "lora_weights") or not model.lora_weights:
         return
 
-    for lora_weights, lora_scale in model.lora_weights[::-1]:
-        apply_lora_to_model(model, lora_weights, -lora_scale, model.f8_clones)
+    if hasattr(model, "clones") and len(model.clones) > 0:
+        # restore original weights from backup copy in vram
+        restore_clones(model)
+    else:
+        for lora_weights, lora_scale in model.lora_weights[::-1]:
+            # subtract lora from merged weights
+            apply_lora_to_model_and_optionally_store_clones(model, lora_weights, -lora_scale, False)
     logger.success(f"LoRAs unloaded in {time.time() - t:.2}s")
 
     model.lora_weights = []
-    model.f8_clones = None
 
+
+def restore_clones(model: Flux):    
+    # Get all unique keys that had LoRA weights applied
+    t = time.time()
+    expected_keys = set()
+    for lora_weights, _ in model.lora_weights:
+        keys = set(key.replace(".lora_A.weight", "")
+                     .replace(".lora_B.weight", "")
+                     .replace(".alpha", "")
+                  for key in lora_weights.keys())
+        expected_keys.update(keys)
+    # Check we have clones for all modules that had LoRA weights
+    assert expected_keys == set(model.clones.keys()), \
+           f"Mismatch between LoRA keys and weight clones. Missing: {expected_keys - set(model.clones.keys())}"
+    
+    for key, clone in model.clones.items():
+        module = get_module_for_key(key, model)
+        if isinstance(module, F8Linear):
+            module.float8_data = clone.float8_data
+            module.scale = clone.scale
+            module.input_scale = clone.input_scale
+            module.scale_reciprocal = clone.scale_reciprocal
+            module.input_scale_reciprocal = clone.input_scale_reciprocal
+        else:
+            module.weight.data = clone.weight
+    
+    logger.success(f"LoRAs unloaded in {time.time() - t:.2}s")
+    logger.info(f"Unloaded {len(model.clones.keys())} layers")
+
+    model.lora_weights = []
+    model.clones = {}
+    return
 
 @torch.inference_mode()
-def apply_lora_to_model(model: Flux, lora_weights: dict, lora_scale: float = 1.0, unload_f8_clones = None):
-    f8_clones = {}
-
+def apply_lora_to_model_and_optionally_store_clones(model: Flux, lora_weights: dict, lora_scale: float = 1.0, store_clones: bool = False):
+    if store_clones and not hasattr(model, "clones"):
+        model.clones = {}
     logger.debug("Extracting keys")
     keys_without_ab = [
         key.replace(".lora_A.weight", "")
@@ -585,60 +616,56 @@ def apply_lora_to_model(model: Flux, lora_weights: dict, lora_scale: float = 1.0
     for key in tqdm(keys_without_ab, desc="Applying LoRA", total=len(keys_without_ab)):
         module = get_module_for_key(key, model)
 
-        if unload_f8_clones and key in unload_f8_clones:
-            clone = unload_f8_clones[key]
-            module.float8_data = clone.float8_data
-            module.scale = clone.scale
-            module.input_scale = clone.input_scale
-            module.scale_reciprocal = clone.scale_reciprocal
-            module.input_scale_reciprocal = clone.input_scale_reciprocal
+        weight_is_f8 = isinstance(module, F8Linear)
+        if weight_is_f8:
+            if store_clones and key not in model.clones:
+                model.clones[key] = F8LinearClone(module)
+            weight_f16 = (
+                module.float8_data.clone()
+                .float()
+                .mul(module.scale_reciprocal)
+                .to(module.weight.device)
+                .to(torch.bfloat16)
+            )
+        elif isinstance(module, torch.nn.Linear) or isinstance(module, CublasLinear):
+            if store_clones and key not in model.clones:
+                model.clones[key] = LinearClone(module)
+            weight_f16 = module.weight.clone()
+        else:
+            raise Exception(f"Trying to load lora on module {key} that is not a linear layer")
+        
+        lora_sd = get_lora_for_key(key, lora_weights)
+
+        assert weight_f16.dtype == torch.bfloat16, f"{key} is {weight_f16.dtype}, not torch.bfloat16"
+
+        if ".linear1" in key:
+            weight_f16 = apply_linear1_lora_weight_to_module(
+                weight_f16, lora_sd, lora_scale=lora_scale
+            )
+
+        elif "_attn.qkv" in key:
+            weight_f16 = apply_attn_qkv_lora_weight_to_module(
+                weight_f16, lora_sd, lora_scale=lora_scale
+            )
 
         else:
-            dtype = model.dtype if hasattr(model, "dtype") else torch.bfloat16
+            weight_f16 = apply_lora_weight_to_module(
+                weight_f16, lora_sd, lora_scale=lora_scale
+            )
 
-            weight_is_f8 = False
-            if isinstance(module, F8Linear):
-                f8_clones[key] = F8LinearClone(module)
+        assert weight_f16.dtype == torch.bfloat16, f"{key} is {weight_f16.dtype} after applying lora, not torch.bfloat16"
 
-                weight_is_f8 = True
-                weight_f16 = (
-                    module.float8_data.clone()
-                    .float()
-                    .mul(module.scale_reciprocal)
-                    .to(module.weight.device)
-                    .to(torch.bfloat16)
-                )
-            elif isinstance(module, torch.nn.Linear):
-                weight_f16 = module.weight.clone()  
-            elif isinstance(module, CublasLinear):
-                weight_f16 = module.weight.clone()  
-            lora_sd = get_lora_for_key(key, lora_weights)
+        if weight_is_f8:
+            module.set_weight_tensor(weight_f16)
+        else:
+            module.weight.data = weight_f16
 
-            assert weight_f16.dtype == torch.bfloat16, f"{key} is {weight_f16.dtype}, not torch.bfloat16"
+    if weight_is_f8:
+        logger.info("Loading LoRA in fp8")
+    else:
+        logger.info("Loading LoRA in bf16")
 
-            if ".linear1" in key:
-                weight_f16 = apply_linear1_lora_weight_to_module(
-                    weight_f16, lora_sd, lora_scale=lora_scale
-                )
-
-            elif "_attn.qkv" in key:
-                weight_f16 = apply_attn_qkv_lora_weight_to_module(
-                    weight_f16, lora_sd, lora_scale=lora_scale
-                )
-
-            else:
-                weight_f16 = apply_lora_weight_to_module(
-                    weight_f16, lora_sd, lora_scale=lora_scale
-                )
-
-            assert weight_f16.dtype == torch.bfloat16, f"{key} is {weight_f16.dtype} after applying lora, not torch.bfloat16"
-
-            if weight_is_f8:
-                module.set_weight_tensor(weight_f16)
-            else:
-                module.weight.data = weight_f16
-
-    return f8_clones
+    return
 
 # The utilities under `_convert_kohya_flux_lora_to_diffusers()`
 # are taken from https://github.com/kohya-ss/sd-scripts/blob/a61cf73a5cb5209c3f4d1a3688dd276a4dfd1ecb/networks/convert_flux_lora.py

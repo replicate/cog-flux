@@ -39,13 +39,25 @@ FLUX_SCHNELL = "flux-schnell"
 
 
 class LoraMixin:
-    def __init__(self, weights_cache: WeightsDownloadCache, scale_multiplier=1.0):
+    """
+    Handles lora loading + extra lora for flux models using BFL code.
+    Merges lora weights with base weights for inference; results in faster inference than unmerged loras.
+    Set store_clones=True to persist copies of unmerged base weights. Consumes extra memory; store_clones=False may degrade performance over time.
+    """
+
+    def __init__(
+        self,
+        weights_cache: WeightsDownloadCache,
+        scale_multiplier=1.0,
+        store_clones=False,
+    ):
         self.lora = None
         self.lora_scale = None
         self.lora_scale_multiplier = scale_multiplier
         self.extra_lora = None
         self.extra_lora_scale = None
         self.weights_cache = weights_cache
+        self.store_clones = store_clones
 
     def handle_loras(
         self,
@@ -88,9 +100,10 @@ class LoraMixin:
                         model,
                         [lora_path, extra_lora_path],
                         [lora_scale, extra_lora_scale],
+                        self.store_clones,
                     )
                 else:
-                    load_lora(model, lora_path, lora_scale)
+                    load_lora(model, lora_path, lora_scale, self.store_clones)
             else:
                 print(f"Lora {lora_weights} already loaded")
                 if extra_lora_weights:
@@ -113,8 +126,12 @@ class BflBf16Predictor(LoraMixin):
         device: str = "cuda",
         offload: bool = False,
         weights_download_cache: WeightsDownloadCache | None = None,
+        restore_lora_from_cloned_weights: bool = False,
     ):
-        super().__init__(weights_cache=weights_download_cache)
+        super().__init__(
+            weights_cache=weights_download_cache,
+            store_clones=restore_lora_from_cloned_weights,
+        )
         self.flow_model_name = flow_model_name
         print(f"Booting model {self.flow_model_name}")
         self.offload = offload
@@ -465,7 +482,7 @@ class BflFp8Predictor(LoraMixin):
         self,
         flow_model_name: str,
         loaded_models: LoadedModels | None,
-        compile: bool = False,
+        torch_compile: bool = False,
         compilation_aspect_ratios: dict[str, Tuple[int, int]] = None,
         offload: bool = False,
         weights_download_cache: WeightsDownloadCache | None = None,
@@ -473,7 +490,7 @@ class BflFp8Predictor(LoraMixin):
         super().__init__(weights_cache=weights_download_cache, scale_multiplier=1.5)
         self.offload = offload
 
-        if compile:
+        if torch_compile:
             extra_args = {
                 "compile_whole_model": True,
                 "compile_extras": True,
@@ -501,7 +518,7 @@ class BflFp8Predictor(LoraMixin):
         # hack to expose this to lora loading
         self.model = self.fp8_pipe.model
 
-        if compile:
+        if torch_compile:
             print("compiling fp8 model")
             st = time.time()
             self.fp8_pipe.generate(

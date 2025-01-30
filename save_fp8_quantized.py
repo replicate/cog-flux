@@ -4,7 +4,6 @@
 
 import os
 from predict import DevPredictor
-from fp8.util import ModelVersion
 
 
 def generate_dev_img(p, img_name="cool_dog_1234.png"):
