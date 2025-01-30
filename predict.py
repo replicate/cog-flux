@@ -430,6 +430,7 @@ class SchnellLoraPredictor(Predictor):
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
             weights_download_cache=cache,
+            restore_lora_from_cloned_weights=True,
         )
 
     def predict(
@@ -485,6 +486,7 @@ class DevLoraPredictor(Predictor):
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
             weights_download_cache=cache,
+            restore_lora_from_cloned_weights=True,
         )
 
     def predict(
