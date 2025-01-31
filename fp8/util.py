@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+import subprocess
+import time
 from typing import Any, Literal, Optional
 
 import torch
@@ -51,6 +54,7 @@ class ModelSpec(BaseModel):
     text_enc_device: str | torch.device | None = "cuda:0"
     ae_device: str | torch.device | None = "cuda:0"
     flux_device: str | torch.device | None = "cuda:0"
+    flux_url: str | None
     flow_dtype: str = "float16"
     ae_dtype: str = "bfloat16"
     text_enc_dtype: str = "bfloat16"
@@ -230,10 +234,24 @@ def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
         logger.warning(
             f"Got {len(unexpected)} unexpected keys:\n\t" + "\n\t".join(unexpected)
         )
+        
+def download_weights(url: str, dest: Path):
+    start = time.time()
+    print("downloading url: ", url)
+    print("downloading to: ", dest)
+    if url.endswith("tar"):
+        subprocess.check_call(["pget", "--log-level=WARNING", "-x", url, dest], close_fds=False)
+    else:
+        subprocess.check_call(["pget", "--log-level=WARNING", url, dest], close_fds=False)
+    print("downloading took: ", time.time() - start)
 
 
 def load_flow_model(config: ModelSpec) -> Flux:
     ckpt_path = config.ckpt_path
+    if not os.path.exists(ckpt_path):
+        flux_url = config.flux_url
+        download_weights(flux_url, ckpt_path)
+
     FluxClass = Flux
 
     with torch.device("meta"):

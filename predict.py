@@ -54,7 +54,9 @@ FALCON_MODEL_URL = (
 )
 
 FLUX_DEV = "flux-dev"
+FLUX_DEV_FP8 = "flux-dev-fp8"
 FLUX_SCHNELL = "flux-schnell"
+FLUX_SCHNELL_FP8 = "flux-schnell-fp8"
 
 # Suppress diffusers nsfw warnings
 logging.getLogger("diffusers").setLevel(logging.CRITICAL)
@@ -309,7 +311,7 @@ class SchnellPredictor(Predictor):
         self.base_setup()
         self.bf16_model = BflBf16Predictor(FLUX_SCHNELL, offload=self.should_offload())
         self.fp8_model = BflFp8Flux(
-            FLUX_SCHNELL,
+            FLUX_SCHNELL_FP8,
             loaded_models=self.bf16_model.get_shared_models(),
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
@@ -357,7 +359,7 @@ class DevPredictor(Predictor):
         self.base_setup()
         self.bf16_model = BflBf16Predictor(FLUX_DEV, offload=self.should_offload())
         self.fp8_model = BflFp8Flux(
-            FLUX_DEV,
+            FLUX_DEV_FP8,
             loaded_models=self.bf16_model.get_shared_models(),
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
@@ -427,7 +429,7 @@ class SchnellLoraPredictor(Predictor):
             restore_lora_from_cloned_weights=True,
         )
         self.fp8_model = BflFp8Flux(
-            FLUX_SCHNELL,
+            FLUX_SCHNELL_FP8,
             loaded_models=self.bf16_model.get_shared_models(),
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
@@ -486,7 +488,7 @@ class DevLoraPredictor(Predictor):
             restore_lora_from_cloned_weights=True,
         )
         self.fp8_model = BflFp8Flux(
-            FLUX_DEV,
+            FLUX_DEV_FP8,
             loaded_models=self.bf16_model.get_shared_models(),
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
@@ -721,7 +723,7 @@ class HotswapPredictor(Predictor):
             t5=shared_models.text_encoder_2,
         )
         self.fp8_dev = BflFp8Flux(
-            FLUX_DEV,
+            FLUX_DEV_FP8,
             shared_models_for_fp8,
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
@@ -731,7 +733,7 @@ class HotswapPredictor(Predictor):
 
         self.bf16_schnell = DiffusersFlux(FLUX_SCHNELL, shared_cache, shared_models)
         self.fp8_schnell = BflFp8Flux(
-            FLUX_SCHNELL,
+            FLUX_SCHNELL_FP8,
             shared_models_for_fp8,
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,

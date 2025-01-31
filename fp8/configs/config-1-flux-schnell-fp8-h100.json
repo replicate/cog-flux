@@ -1,5 +1,5 @@
 {
-  "version": "flux-dev",
+  "version": "flux-schnell",
   "params": {
     "in_channels": 64,
     "vec_in_dim": 768,
@@ -16,7 +16,7 @@
     ],
     "theta": 10000,
     "qkv_bias": true,
-    "guidance_embed": true
+    "guidance_embed": false
   },
   "ae_params": {
     "resolution": 256,
@@ -34,13 +34,13 @@
     "scale_factor": 0.3611,
     "shift_factor": 0.1159
   },
-  "ckpt_path": "./model-cache/dev-fp8/dev-fp8.safetensors",
-  "flux_url": "https://weights.replicate.delivery/default/official-models/flux/dev/dev-fp8.safetensors",
+  "ckpt_path": "./model-cache/schnell-fp8/schnell-fp8.safetensors",
+  "flux_url": "https://weights.replicate.delivery/default/official-models/flux/schnell/schnell-fp8.safetensors",
   "ae_path": "./model-cache/ae/ae.sft",
   "repo_id": "n/a",
   "repo_flow": "n/a",
   "repo_ae": "n/a",
-  "text_enc_max_length": 512,
+  "text_enc_max_length": 256,
   "text_enc_path": "./model-cache/t5",
   "text_enc_device": "cuda:0",
   "ae_device": "cuda:0",
