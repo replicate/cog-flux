@@ -486,8 +486,9 @@ class BflFp8Predictor(LoraMixin):
         compilation_aspect_ratios: dict[str, Tuple[int, int]] = None,
         offload: bool = False,
         weights_download_cache: WeightsDownloadCache | None = None,
+        restore_lora_from_cloned_weights: bool = False
     ):
-        super().__init__(weights_cache=weights_download_cache, scale_multiplier=1.5)
+        super().__init__(weights_cache=weights_download_cache, scale_multiplier=1.5, store_clones=restore_lora_from_cloned_weights)
         self.offload = offload
 
         if torch_compile:
