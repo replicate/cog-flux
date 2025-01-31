@@ -10,7 +10,6 @@ predict:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 1
         num_inference_steps: 28
-        guidance_scale: 2.5
         seed: 8888
         output_format: jpg
         go_fast: true
@@ -23,7 +22,6 @@ predict:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 4
         num_inference_steps: 28
-        guidance_scale: 2.5
         seed: 8888
         output_format: jpg
         go_fast: true
@@ -37,7 +35,6 @@ predict:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 1
         num_inference_steps: 28
-        guidance_scale: 2.5
         seed: 8888
         output_format: jpg
         go_fast: false
@@ -50,7 +47,6 @@ predict:
         prompt: a photo of MNALSA woman with pink hair at a rave
         num_outputs: 1
         num_inference_steps: 28
-        guidance_scale: 2.5
         seed: 8888
         output_format: jpg
         go_fast: true
@@ -63,7 +59,6 @@ predict:
         lora_weights: aramintak/flux-softserve-anime
         num_outputs: 1
         num_inference_steps: 28
-        guidance_scale: 2.5
         seed: 8888
         output_format: jpg
         go_fast: true
@@ -75,7 +70,6 @@ predict:
         prompt: a coca cola can "sacred elixir" arcana in the style of TOK a trtcrd, tarot style
         num_outputs: 1
         num_inference_steps: 28
-        guidance_scale: 2.5
         seed: 8888
         output_format: jpg
         go_fast: true
@@ -88,7 +82,6 @@ predict:
         prompt: cy04, a book titled "Did I Leave The Oven On?", an illustration of a man sitting at work, looking worried, thought bubble above his head with an oven in it
         num_outputs: 1
         num_inference_steps: 28
-        guidance_scale: 2.5
         output_format: jpg
         go_fast: true
         lora_weights: huggingface.co/Purz/choose-your-own-adventure
@@ -100,7 +93,6 @@ predict:
         prompt: photo of a boy ANIMESTYLE
         num_outputs: 1
         num_inference_steps: 28
-        guidance_scale: 3.5
         output_format: jpg
         go_fast: true
         lora_weights: https://storage.googleapis.com/replicate-models-public-test/flux-loras/fixed_lora.safetensors

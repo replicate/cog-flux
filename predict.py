@@ -419,7 +419,7 @@ class SchnellLoraPredictor(Predictor):
         self.base_setup()
         cache = WeightsDownloadCache()
         self.bf16_model = BflBf16Predictor(
-            FLUX_SCHNELL, offload=self.should_offload(), weights_download_cache=cache
+            FLUX_SCHNELL, offload=self.should_offload(), weights_download_cache=cache, restore_lora_from_cloned_weights=True
         )
         self.fp8_model = BflFp8Predictor(
             FLUX_SCHNELL,
@@ -475,7 +475,7 @@ class DevLoraPredictor(Predictor):
         self.base_setup()
         cache = WeightsDownloadCache()
         self.bf16_model = BflBf16Predictor(
-            FLUX_DEV, offload=self.should_offload(), weights_download_cache=cache
+            FLUX_DEV, offload=self.should_offload(), weights_download_cache=cache, restore_lora_from_cloned_weights=True
         )
         self.fp8_model = BflFp8Predictor(
             FLUX_DEV,
