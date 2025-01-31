@@ -477,7 +477,7 @@ class BflControlNetFlux(BflBf16Predictor):
         return rearrange(img_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
 
 
-class BflFp8Predictor(LoraMixin):
+class BflFp8Flux(LoraMixin):
     def __init__(
         self,
         flow_model_name: str,

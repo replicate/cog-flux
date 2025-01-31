@@ -2,60 +2,41 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import List, cast
+from typing import List
 
 import numpy as np
 import torch
 import logging
 from PIL import Image
-from cog import BasePredictor, Input, Path
+from pathlib import Path
 from diffusers.pipelines.flux import (
     FluxPipeline,
     FluxInpaintPipeline,
     FluxImg2ImgPipeline,
 )
-from diffusers.pipelines.stable_diffusion.safety_checker import (
-    StableDiffusionSafetyChecker,
-)
-from transformers import (
-    CLIPImageProcessor,
-    AutoModelForImageClassification,
-    ViTImageProcessor,
-)
 
 from weights import WeightsDownloadCache
 
-# TODO: this has been built into diffusers now.
 from lora_loading_patch import load_lora_into_transformer
 
 MODEL_URL_DEV = (
     "https://weights.replicate.delivery/default/black-forest-labs/FLUX.1-dev/files.tar"
 )
 MODEL_URL_SCHNELL = "https://weights.replicate.delivery/default/black-forest-labs/FLUX.1-schnell/slim.tar"
-SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
-SAFETY_CACHE_PATH = Path("safety-cache")
+
 FLUX_DEV_PATH = Path("FLUX.1-dev")
 FLUX_SCHNELL_PATH = Path("FLUX.1-schnell")
-FEATURE_EXTRACTOR = Path("/src/feature-extractor")
 
-FALCON_MODEL_NAME = "Falconsai/nsfw_image_detection"
-FALCON_MODEL_CACHE = "falcon-cache"
-FALCON_MODEL_URL = (
-    "https://weights.replicate.delivery/default/falconai/nsfw-image-detection.tar"
-)
+@dataclass
+class FluxConfig:
+    url: str
+    path: str
+    num_steps: int
+    max_sequence_length: int
 
-ASPECT_RATIOS = {
-    "1:1": (1024, 1024),
-    "16:9": (1344, 768),
-    "21:9": (1536, 640),
-    "3:2": (1216, 832),
-    "2:3": (832, 1216),
-    "4:5": (896, 1088),
-    "5:4": (1088, 896),
-    "3:4": (896, 1152),
-    "4:3": (1152, 896),
-    "9:16": (768, 1344),
-    "9:21": (640, 1536),
+CONFIGS = {
+    "flux-schnell": FluxConfig(MODEL_URL_SCHNELL, FLUX_SCHNELL_PATH, 4, 256),
+    "flux-dev": FluxConfig(MODEL_URL_DEV, FLUX_DEV_PATH, 28, 512)
 }
 
 # Suppress diffusers nsfw warnings
@@ -68,38 +49,51 @@ class LoadedLoRAs:
     main: str | None
     extra: str | None
 
+from diffusers import AutoencoderKL
+from transformers import CLIPTextModel, T5EncoderModel, CLIPTokenizer, T5TokenizerFast
 
-class Predictor(BasePredictor):
-    def setup(
+@dataclass
+class ModelHolster:
+    vae: AutoencoderKL | None
+    text_encoder: CLIPTextModel | None
+    text_encoder_2: T5EncoderModel | None
+    tokenizer: CLIPTokenizer | None
+    tokenizer_2: T5TokenizerFast | None
+
+class DiffusersFlux:
+    def __init__(
         self,
-        model_path: str,
+        model_name: str,
         weights_cache: WeightsDownloadCache,
-        vae: AutoencoderKL | None = None,
-        text_encoder: CLIPTextModel | None = None,
-        text_encoder_2: T5EncoderModel | None = None,
-        tokenizer: CLIPTokenizer | None = None,
-        tokenizer_2: T5TokenizerFast | None = None,
+        shared_models: ModelHolster
     ) -> None:  # pyright: ignore
         """Load the model into memory to make running multiple predictions efficient"""
         start = time.time()
+
         # Don't pull weights
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+        config = CONFIGS[model_name]
+        model_path = config.path
+
+        self.default_num_steps = config.num_steps
+        self.max_sequence_length = config.max_sequence_length
 
         # dependency injection hell yeah it's java time baybee
         self.weights_cache = weights_cache
 
         if not os.path.exists(model_path):
-            print(f"Model path not found, downloading models")
+            print("Model path not found, downloading models")
             download_base_weights(model_path, Path("."))
 
         print("Loading pipeline")
         txt2img_pipe = FluxPipeline.from_pretrained(
             model_path,
-            vae=vae,
-            text_encoder=text_encoder,
-            text_encoder_2=text_encoder_2,
-            tokenizer=tokenizer,
-            tokenizer_2=tokenizer_2,
+            vae=shared_models.vae,
+            text_encoder=shared_models.text_encoder,
+            text_encoder_2=shared_models.text_encoder_2,
+            tokenizer=shared_models.tokenizer,
+            tokenizer_2=shared_models.tokenizer_2,
             torch_dtype=torch.bfloat16,
         ).to("cuda")
         txt2img_pipe.__class__.load_lora_into_transformer = classmethod(
@@ -139,132 +133,68 @@ class Predictor(BasePredictor):
 
         self.inpaint_pipe = inpaint_pipe
 
-        self.loaded_lora_urls = (LoadedLoRAs(main=None, extra=None),)
+        self.loaded_lora_urls = LoadedLoRAs(main=None, extra=None)
+        self.lora_scale = 1.0
         print("setup took: ", time.time() - start)
+
+    def get_models(self):
+        return ModelHolster(
+            vae=self.txt2img_pipe.vae,
+            text_encoder=self.txt2img_pipe.text_encoder,
+            text_encoder_2=self.txt2img_pipe.text_encoder_2,
+            tokenizer=self.txt2img_pipe.tokenizer,
+            tokenizer_2=self.txt2img_pipe.tokenizer_2)
+
+
+    def handle_loras(self, lora_weights, lora_scale, extra_lora, extra_lora_scale):
+        # all pipes share the same weights, can do this to any of them
+        pipe = self.txt2img_pipe
+
+        if lora_weights:
+            start_time = time.time()
+            if extra_lora:
+                self.lora_scale = 1.0
+                self.load_multiple_loras(lora_weights, extra_lora)
+                pipe.set_adapters(
+                    ["main", "extra"], adapter_weights=[lora_scale, extra_lora_scale]
+                )
+            else:
+                self.load_single_lora(lora_weights)
+                pipe.set_adapters(["main"], adapter_weights=[lora_scale])
+                self.lora_scale = lora_scale
+            print(f"Loaded LoRAs in {time.time() - start_time:.2f}s")
+        else:
+            pipe.unload_lora_weights()
+            self.loaded_lora_urls = LoadedLoRAs(main=None, extra=None)
+            self.lora_scale = 1.0
 
     @torch.inference_mode()
     def predict(  # pyright: ignore
         self,
-        prompt: str = Input(
-            description="Prompt for generated image. If you include the `trigger_word` used in the training process you are more likely to activate the trained object, style, or concept in the resulting image."
-        ),
-        image: Path = Input(
-            description="Input image for img2img or inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored.",
-            default=None,
-        ),
-        mask: Path = Input(
-            description="Input mask for inpainting mode. Black areas will be preserved, white areas will be inpainted. Must be provided along with 'image' for inpainting mode.",
-            default=None,
-        ),
-        aspect_ratio: str = Input(
-            description="Aspect ratio for the generated image in text-to-image mode. The size will always be 1 megapixel, i.e. 1024x1024 if aspect ratio is 1:1. To use arbitrary width and height, set aspect ratio to 'custom'. Note: Ignored in img2img and inpainting modes.",
-            choices=list(ASPECT_RATIOS.keys()) + ["custom"],  # pyright: ignore
-            default="1:1",
-        ),
-        width: int = Input(
-            description="Width of the generated image in text-to-image mode. Only used when aspect_ratio=custom. Must be a multiple of 16 (if it's not, it will be rounded to nearest multiple of 16). Note: Ignored in img2img and inpainting modes.",
-            ge=256,
-            le=1440,
-            default=None,
-        ),
-        height: int = Input(
-            description="Height of the generated image in text-to-image mode. Only used when aspect_ratio=custom. Must be a multiple of 16 (if it's not, it will be rounded to nearest multiple of 16). Note: Ignored in img2img and inpainting modes.",
-            ge=256,
-            le=1440,
-            default=None,
-        ),
-        num_outputs: int = Input(
-            description="Number of images to output.",
-            ge=1,
-            le=4,
-            default=1,
-        ),
-        lora_scale: float = Input(
-            description="Determines how strongly the main LoRA should be applied. Sane results between 0 and 1.",
-            default=1.0,
-            le=2.0,
-            ge=-1.0,
-        ),
-        num_inference_steps: int = Input(
-            description="Number of inference steps. More steps can give more detailed images, but take longer.",
-            ge=1,
-            le=50,
-            default=28,
-        ),
-        model: str = Input(
-            description="Which model to run inferences with. The dev model needs around 28 steps but the schnell model only needs around 4 steps.",
-            choices=["dev", "schnell"],
-            default="dev",
-        ),
-        guidance_scale: float = Input(
-            description="Guidance scale for the diffusion process. Lower values can give more realistic images. Good values to try are 2, 2.5, 3 and 3.5",
-            ge=0,
-            le=10,
-            default=3.5,
-        ),
-        prompt_strength: float = Input(
-            description="Prompt strength when using img2img / inpaint. 1.0 corresponds to full destruction of information in image",
-            ge=0.0,
-            le=1.0,
-            default=0.8,
-        ),
-        seed: int = Input(
-            description="Random seed. Set for reproducible generation.", default=None
-        ),
-        extra_lora: str = Input(
-            description="Combine this fine-tune with another LoRA. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
-            default=None,
-        ),
-        extra_lora_scale: float = Input(
-            description="Determines how strongly the extra LoRA should be applied.",
-            default=1.0,
-            le=2.0,
-            ge=-1.0,
-        ),
-        output_format: str = Input(
-            description="Format of the output images.",
-            choices=["webp", "jpg", "png"],
-            default="webp",
-        ),
-        output_quality: int = Input(
-            description="Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs",
-            default=90,
-            ge=0,
-            le=100,
-        ),
-        replicate_weights: str = Input(
-            description="Replicate LoRA weights to use. Leave blank to use the default weights.",
-            default=None,
-        ),
-        disable_safety_checker: bool = Input(
-            description="Disable safety checker for generated images.",
-            default=False,
-        ),
+        prompt: str ,
+        num_outputs: int = 1,
+        num_inference_steps: int | None = None,
+        legacy_image_path: Path = None,
+        legacy_mask_path: Path = None,
+        width: int | None = None,
+        height: int | None = None,
+        guidance: float = 3.5,
+        prompt_strength: float = 0.8,
+        seed: int | None = None,
     ) -> List[Path]:
         """Run a single prediction on the model"""
         if seed is None or seed < 0:
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
 
-        if aspect_ratio == "custom":
-            if width is None or height is None:
-                raise ValueError(
-                    "width and height must be defined if aspect ratio is 'custom'"
-                )
-            width = make_multiple_of_16(width)
-            height = make_multiple_of_16(height)
-        else:
-            width, height = self.aspect_ratio_to_width_height(aspect_ratio)
-        max_sequence_length = 512
-
-        is_img2img_mode = image is not None and mask is None
-        is_inpaint_mode = image is not None and mask is not None
+        is_img2img_mode = legacy_image_path is not None and legacy_mask_path is None
+        is_inpaint_mode = legacy_image_path is not None and legacy_mask_path is not None
 
         flux_kwargs = {}
         print(f"Prompt: {prompt}")
 
         if is_img2img_mode or is_inpaint_mode:
-            input_image = Image.open(image).convert("RGB")
+            input_image = Image.open(legacy_image_path).convert("RGB")
             original_width, original_height = input_image.size
 
             # Calculate dimensions that are multiples of 16
@@ -276,12 +206,8 @@ class Predictor(BasePredictor):
                 f"[!] Resizing input image from {original_width}x{original_height} to {target_width}x{target_height}"
             )
 
-            # Determine if we should use highest quality settings
-            use_highest_quality = output_quality == 100 or output_format == "png"
-
-            # Resize the input image
-            resampling_method = Image.LANCZOS if use_highest_quality else Image.BICUBIC
-            input_image = input_image.resize(target_size, resampling_method)
+            # We're using highest quality settings; if you want to go fast, you're not running this code.
+            input_image = input_image.resize(target_size, Image.LANCZOS)
             flux_kwargs["image"] = input_image
 
             # Set width and height to match the resized input image
@@ -289,117 +215,63 @@ class Predictor(BasePredictor):
 
             if is_img2img_mode:
                 print("[!] img2img mode")
-                pipe = self.img2img_pipes[model]
+                pipe = self.img2img_pipe
             else:  # is_inpaint_mode
                 print("[!] inpaint mode")
-                mask_image = Image.open(mask).convert("RGB")
+                mask_image = Image.open(legacy_mask_path).convert("RGB")
                 mask_image = mask_image.resize(target_size, Image.NEAREST)
                 flux_kwargs["mask_image"] = mask_image
-                pipe = self.inpaint_pipes[model]
+                pipe = self.inpaint_pipe
 
             flux_kwargs["strength"] = prompt_strength
-            print(
-                f"[!] Using {model} model for {'img2img' if is_img2img_mode else 'inpainting'}"
-            )
+
         else:  # is_txt2img_mode
             print("[!] txt2img mode")
-            pipe = self.pipes[model]
+            pipe = self.txt2img_pipe
             flux_kwargs["width"] = width
             flux_kwargs["height"] = height
 
-        if replicate_weights:
-            flux_kwargs["joint_attention_kwargs"] = {"scale": lora_scale}
-
-        assert model in ["dev", "schnell"]
-        if model == "dev":
-            print("Using dev model")
-            max_sequence_length = 512
-        else:  # model == "schnell":
-            print("Using schnell model")
-            max_sequence_length = 256
-            guidance_scale = 0
-
-        if replicate_weights:
-            start_time = time.time()
-            if extra_lora:
-                flux_kwargs["joint_attention_kwargs"] = {"scale": 1.0}
-                print(f"Loading extra LoRA weights from: {extra_lora}")
-                self.load_multiple_loras(replicate_weights, extra_lora, model)
-                pipe.set_adapters(
-                    ["main", "extra"], adapter_weights=[lora_scale, extra_lora_scale]
-                )
-            else:
-                flux_kwargs["joint_attention_kwargs"] = {"scale": lora_scale}
-                self.load_single_lora(replicate_weights, model)
-                pipe.set_adapters(["main"], adapter_weights=[lora_scale])
-            print(f"Loaded LoRAs in {time.time() - start_time:.2f}s")
-        else:
-            pipe.unload_lora_weights()
-            self.loaded_lora_urls[model] = LoadedLoRAs(main=None, extra=None)
+        max_sequence_length = self.max_sequence_length
 
         generator = torch.Generator(device="cuda").manual_seed(seed)
 
+        if self.loaded_lora_urls.main is not None:
+            # this sets lora scale for prompt encoding, weirdly enough. it does not actually do anything with attention processing anymore.
+            flux_kwargs["joint_attention_kwargs"] = {"scale": self.lora_scale}
+
         common_args = {
             "prompt": [prompt] * num_outputs,
-            "guidance_scale": guidance_scale,
+            "guidance_scale": guidance,
             "generator": generator,
-            "num_inference_steps": num_inference_steps,
+            "num_inference_steps": num_inference_steps if num_inference_steps else self.default_num_steps,
             "max_sequence_length": max_sequence_length,
             "output_type": "pil",
         }
 
         output = pipe(**common_args, **flux_kwargs)
 
-        has_nsfw_content = None
-        if not disable_safety_checker:
-            _, has_nsfw_content = self.run_safety_checker(output.images)
+        return output.images, [np.array(img) for img in output.images]
 
-        output_paths = []
-        for i, image in enumerate(output.images):
-            if has_nsfw_content is not None and has_nsfw_content[i]:
-                try:
-                    falcon_is_safe = self.run_falcon_safety_checker(image)
-                except Exception as e:
-                    print(f"Error running safety checker: {e}")
-                    falcon_is_safe = False
-                if not falcon_is_safe:
-                    print(f"NSFW content detected in image {i}")
-                    continue
-            output_path = f"/tmp/out-{i}.{output_format}"
-            if output_format != "png":
-                image.save(output_path, quality=output_quality, optimize=True)
-            else:
-                image.save(output_path)
-            output_paths.append(Path(output_path))
-
-        if len(output_paths) == 0:
-            raise Exception(
-                "NSFW content detected. Try running it again, or try a different prompt."
-            )
-
-        return output_paths
-
-    def load_single_lora(self, lora_url: str, model: str):
+    def load_single_lora(self, lora_url: str):
         # If no change, skip
-        if lora_url == self.loaded_lora_urls[model].main:
+        if lora_url == self.loaded_lora_urls.main:
             print("Weights already loaded")
             return
 
-        pipe = self.pipes[model]
+        pipe = self.txt2img_pipe
         pipe.unload_lora_weights()
         lora_path = self.weights_cache.ensure(lora_url)
         pipe.load_lora_weights(lora_path, adapter_name="main")
-        self.loaded_lora_urls[model] = LoadedLoRAs(main=lora_url, extra=None)
+        self.loaded_lora_urls = LoadedLoRAs(main=lora_url, extra=None)
         pipe = pipe.to("cuda")
 
     def load_multiple_loras(self, main_lora_url: str, extra_lora_url: str, model: str):
-        pipe = self.pipes[model]
-        loaded_lora_urls = self.loaded_lora_urls[model]
+        pipe = self.txt2img_pipe
 
         # If no change, skip
         if (
-            main_lora_url == loaded_lora_urls.main
-            and extra_lora_url == self.loaded_lora_urls[model].extra
+            main_lora_url == self.loaded_lora_urls.main
+            and extra_lora_url == self.loaded_lora_urls.extra
         ):
             print("Weights already loaded")
             return
@@ -413,36 +285,10 @@ class Predictor(BasePredictor):
         extra_lora_path = self.weights_cache.ensure(extra_lora_url)
         pipe.load_lora_weights(extra_lora_path, adapter_name="extra")
 
-        self.loaded_lora_urls[model] = LoadedLoRAs(
+        self.loaded_lora_urls = LoadedLoRAs(
             main=main_lora_url, extra=extra_lora_url
         )
         pipe = pipe.to("cuda")
-
-    @torch.amp.autocast("cuda")  # pyright: ignore
-    def run_safety_checker(self, image):
-        safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(
-            "cuda"
-        )
-        np_image = [np.array(val) for val in image]
-        image, has_nsfw_concept = self.safety_checker(
-            images=np_image,
-            clip_input=safety_checker_input.pixel_values.to(torch.float16),
-        )
-        return image, has_nsfw_concept
-
-    @torch.amp.autocast("cuda")  # pyright: ignore
-    def run_falcon_safety_checker(self, image):
-        with torch.no_grad():
-            inputs = self.falcon_processor(images=image, return_tensors="pt")
-            outputs = self.falcon_model(**inputs)
-            logits = outputs.logits
-            predicted_label = logits.argmax(-1).item()
-            result = self.falcon_model.config.id2label[predicted_label]
-
-        return result == "normal"
-
-    def aspect_ratio_to_width_height(self, aspect_ratio: str) -> tuple[int, int]:
-        return ASPECT_RATIOS[aspect_ratio]
 
 
 def download_base_weights(url: str, dest: Path):

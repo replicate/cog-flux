@@ -8,9 +8,11 @@ from bfl_predictor import (
     BflBf16Predictor,
     BflControlNetFlux,
     BflFillFlux,
-    BflFp8Predictor,
+    BflFp8Flux,
     BflReduxPredictor,
 )
+from diffusers_predictor import DiffusersFlux
+from fp8.util import LoadedModels
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -306,7 +308,7 @@ class SchnellPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup()
         self.bf16_model = BflBf16Predictor(FLUX_SCHNELL, offload=self.should_offload())
-        self.fp8_model = BflFp8Predictor(
+        self.fp8_model = BflFp8Flux(
             FLUX_SCHNELL,
             loaded_models=self.bf16_model.get_shared_models(),
             torch_compile=True,
@@ -354,7 +356,7 @@ class DevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup()
         self.bf16_model = BflBf16Predictor(FLUX_DEV, offload=self.should_offload())
-        self.fp8_model = BflFp8Predictor(
+        self.fp8_model = BflFp8Flux(
             FLUX_DEV,
             loaded_models=self.bf16_model.get_shared_models(),
             torch_compile=True,
@@ -421,7 +423,7 @@ class SchnellLoraPredictor(Predictor):
         self.bf16_model = BflBf16Predictor(
             FLUX_SCHNELL, offload=self.should_offload(), weights_download_cache=cache, restore_lora_from_cloned_weights=True
         )
-        self.fp8_model = BflFp8Predictor(
+        self.fp8_model = BflFp8Flux(
             FLUX_SCHNELL,
             loaded_models=self.bf16_model.get_shared_models(),
             torch_compile=True,
@@ -477,7 +479,7 @@ class DevLoraPredictor(Predictor):
         self.bf16_model = BflBf16Predictor(
             FLUX_DEV, offload=self.should_offload(), weights_download_cache=cache, restore_lora_from_cloned_weights=True
         )
-        self.fp8_model = BflFp8Predictor(
+        self.fp8_model = BflFp8Flux(
             FLUX_DEV,
             loaded_models=self.bf16_model.get_shared_models(),
             torch_compile=True,
@@ -699,18 +701,20 @@ class FillDevPredictor(Predictor):
         )
 
 
-# TODO(dan): finish refactor
-class HotswapPredictor(BasePredictor):
+class HotswapPredictor(Predictor):
     def setup(self) -> None:
-        self.schnell_lora = SchnellLoraPredictor()
-        self.schnell_lora.setup()
+        self.base_setup()
+        shared_cache = WeightsDownloadCache()
 
-        self.dev_lora = DevLoraPredictor()
-        self.dev_lora.setup(
-            t5=self.schnell_lora.t5,
-            clip=self.schnell_lora.clip,
-            ae=self.schnell_lora.ae,
-        )
+        # TODO: actually download and load serialized fp8 models.
+        self.bf16_dev = DiffusersFlux(FLUX_DEV, shared_cache)
+        shared_models = self.bf16_dev.get_models()
+        shared_models_for_fp8 = LoadedModels(ae=shared_models.vae, clip=shared_models.text_encoder, t5=shared_models.text_encoder_2)
+        self.fp8_dev = BflFp8Flux(FLUX_DEV, shared_models_for_fp8, torch_compile=True, compilation_aspect_ratios=ASPECT_RATIOS, weights_download_cache=shared_cache, restore_lora_from_cloned_weights=True)
+
+        self.bf16_schnell = DiffusersFlux(FLUX_SCHNELL, shared_cache, shared_models)
+        self.fp8_schnell = BflFp8Flux(FLUX_SCHNELL, shared_models_for_fp8, torch_compile=True, compilation_aspect_ratios=ASPECT_RATIOS, weights_download_cache=shared_cache, restore_lora_from_cloned_weights=True)
+
 
     def predict(
         self,
@@ -785,23 +789,18 @@ class HotswapPredictor(BasePredictor):
             ge=-1,
         ),
     ) -> List[Path]:
-        # so you're basically gonna just call the model.
-        model = self.dev_lora if model == "dev" else self.schnell_lora
-
         if aspect_ratio == "custom":
             if go_fast:
                 print(
                     "Custom aspect ratios not supported with fast fp8 inference; will run in bf16"
                 )
                 go_fast = False
+            width = make_multiple_of_16(width)
+            height = make_multiple_of_16(height)
         else:
-            width, height = model.size_from_aspect_megapixels(
+            width, height = self.size_from_aspect_megapixels(
                 aspect_ratio, megapixels=megapixels
             )
-
-        model.handle_loras(
-            go_fast, replicate_weights, lora_scale, extra_lora, extra_lora_scale
-        )
 
         if image and go_fast:
             print(
@@ -809,21 +808,29 @@ class HotswapPredictor(BasePredictor):
             )
             go_fast = False
 
-        imgs, np_imgs = model.shared_predict(
-            go_fast,
+        if model == "dev":
+            model = self.fp8_dev if go_fast else self.bf16_dev
+        else:
+            model = self.fp8_schnell if go_fast else self.bf16_schnell
+
+        model.handle_loras(
+            replicate_weights, lora_scale, extra_lora, extra_lora_scale
+        )
+
+        imgs, np_imgs = model.predict(
             prompt,
             num_outputs,
             num_inference_steps,
             guidance=guidance_scale,
-            image=image,
+            legacy_image_path=image,
+            legacy_mask_path=mask,
             prompt_strength=prompt_strength,
             seed=seed,
             width=width,
             height=height,
-            legacy_mask_path=mask,
         )
 
-        return model.postprocess(
+        return self.postprocess(
             imgs,
             disable_safety_checker,
             output_format,
@@ -928,3 +935,8 @@ class TestPredictor(Predictor):
 
     def predict(self, how_many: int = Input(description="how many", ge=0)) -> Any:
         return self.num + how_many
+
+
+def make_multiple_of_16(n):
+    # Rounds up to the next multiple of 16, or returns n if already a multiple of 16
+    return ((n + 15) // 16) * 16
