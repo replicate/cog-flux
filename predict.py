@@ -421,7 +421,10 @@ class SchnellLoraPredictor(Predictor):
         self.base_setup()
         cache = WeightsDownloadCache()
         self.bf16_model = BflBf16Predictor(
-            FLUX_SCHNELL, offload=self.should_offload(), weights_download_cache=cache, restore_lora_from_cloned_weights=True
+            FLUX_SCHNELL,
+            offload=self.should_offload(),
+            weights_download_cache=cache,
+            restore_lora_from_cloned_weights=True,
         )
         self.fp8_model = BflFp8Flux(
             FLUX_SCHNELL,
@@ -477,7 +480,10 @@ class DevLoraPredictor(Predictor):
         self.base_setup()
         cache = WeightsDownloadCache()
         self.bf16_model = BflBf16Predictor(
-            FLUX_DEV, offload=self.should_offload(), weights_download_cache=cache, restore_lora_from_cloned_weights=True
+            FLUX_DEV,
+            offload=self.should_offload(),
+            weights_download_cache=cache,
+            restore_lora_from_cloned_weights=True,
         )
         self.fp8_model = BflFp8Flux(
             FLUX_DEV,
@@ -709,12 +715,29 @@ class HotswapPredictor(Predictor):
         # TODO: actually download and load serialized fp8 models.
         self.bf16_dev = DiffusersFlux(FLUX_DEV, shared_cache)
         shared_models = self.bf16_dev.get_models()
-        shared_models_for_fp8 = LoadedModels(ae=shared_models.vae, clip=shared_models.text_encoder, t5=shared_models.text_encoder_2)
-        self.fp8_dev = BflFp8Flux(FLUX_DEV, shared_models_for_fp8, torch_compile=True, compilation_aspect_ratios=ASPECT_RATIOS, weights_download_cache=shared_cache, restore_lora_from_cloned_weights=True)
+        shared_models_for_fp8 = LoadedModels(
+            ae=shared_models.vae,
+            clip=shared_models.text_encoder,
+            t5=shared_models.text_encoder_2,
+        )
+        self.fp8_dev = BflFp8Flux(
+            FLUX_DEV,
+            shared_models_for_fp8,
+            torch_compile=True,
+            compilation_aspect_ratios=ASPECT_RATIOS,
+            weights_download_cache=shared_cache,
+            restore_lora_from_cloned_weights=True,
+        )
 
         self.bf16_schnell = DiffusersFlux(FLUX_SCHNELL, shared_cache, shared_models)
-        self.fp8_schnell = BflFp8Flux(FLUX_SCHNELL, shared_models_for_fp8, torch_compile=True, compilation_aspect_ratios=ASPECT_RATIOS, weights_download_cache=shared_cache, restore_lora_from_cloned_weights=True)
-
+        self.fp8_schnell = BflFp8Flux(
+            FLUX_SCHNELL,
+            shared_models_for_fp8,
+            torch_compile=True,
+            compilation_aspect_ratios=ASPECT_RATIOS,
+            weights_download_cache=shared_cache,
+            restore_lora_from_cloned_weights=True,
+        )
 
     def predict(
         self,
@@ -813,9 +836,7 @@ class HotswapPredictor(Predictor):
         else:
             model = self.fp8_schnell if go_fast else self.bf16_schnell
 
-        model.handle_loras(
-            replicate_weights, lora_scale, extra_lora, extra_lora_scale
-        )
+        model.handle_loras(replicate_weights, lora_scale, extra_lora, extra_lora_scale)
 
         imgs, np_imgs = model.predict(
             prompt,

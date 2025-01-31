@@ -27,6 +27,7 @@ MODEL_URL_SCHNELL = "https://weights.replicate.delivery/default/black-forest-lab
 FLUX_DEV_PATH = Path("FLUX.1-dev")
 FLUX_SCHNELL_PATH = Path("FLUX.1-schnell")
 
+
 @dataclass
 class FluxConfig:
     url: str
@@ -34,9 +35,10 @@ class FluxConfig:
     num_steps: int
     max_sequence_length: int
 
+
 CONFIGS = {
     "flux-schnell": FluxConfig(MODEL_URL_SCHNELL, FLUX_SCHNELL_PATH, 4, 256),
-    "flux-dev": FluxConfig(MODEL_URL_DEV, FLUX_DEV_PATH, 28, 512)
+    "flux-dev": FluxConfig(MODEL_URL_DEV, FLUX_DEV_PATH, 28, 512),
 }
 
 # Suppress diffusers nsfw warnings
@@ -49,8 +51,10 @@ class LoadedLoRAs:
     main: str | None
     extra: str | None
 
+
 from diffusers import AutoencoderKL
 from transformers import CLIPTextModel, T5EncoderModel, CLIPTokenizer, T5TokenizerFast
+
 
 @dataclass
 class ModelHolster:
@@ -60,12 +64,13 @@ class ModelHolster:
     tokenizer: CLIPTokenizer | None
     tokenizer_2: T5TokenizerFast | None
 
+
 class DiffusersFlux:
     def __init__(
         self,
         model_name: str,
         weights_cache: WeightsDownloadCache,
-        shared_models: ModelHolster
+        shared_models: ModelHolster,
     ) -> None:  # pyright: ignore
         """Load the model into memory to make running multiple predictions efficient"""
         start = time.time()
@@ -84,7 +89,7 @@ class DiffusersFlux:
 
         if not os.path.exists(model_path):
             print("Model path not found, downloading models")
-            download_base_weights(model_path, Path("."))
+            download_base_weights(model_path, Path())
 
         print("Loading pipeline")
         txt2img_pipe = FluxPipeline.from_pretrained(
@@ -143,8 +148,8 @@ class DiffusersFlux:
             text_encoder=self.txt2img_pipe.text_encoder,
             text_encoder_2=self.txt2img_pipe.text_encoder_2,
             tokenizer=self.txt2img_pipe.tokenizer,
-            tokenizer_2=self.txt2img_pipe.tokenizer_2)
-
+            tokenizer_2=self.txt2img_pipe.tokenizer_2,
+        )
 
     def handle_loras(self, lora_weights, lora_scale, extra_lora, extra_lora_scale):
         # all pipes share the same weights, can do this to any of them
@@ -171,7 +176,7 @@ class DiffusersFlux:
     @torch.inference_mode()
     def predict(  # pyright: ignore
         self,
-        prompt: str ,
+        prompt: str,
         num_outputs: int = 1,
         num_inference_steps: int | None = None,
         legacy_image_path: Path = None,
@@ -243,7 +248,9 @@ class DiffusersFlux:
             "prompt": [prompt] * num_outputs,
             "guidance_scale": guidance,
             "generator": generator,
-            "num_inference_steps": num_inference_steps if num_inference_steps else self.default_num_steps,
+            "num_inference_steps": num_inference_steps
+            if num_inference_steps
+            else self.default_num_steps,
             "max_sequence_length": max_sequence_length,
             "output_type": "pil",
         }
@@ -265,7 +272,7 @@ class DiffusersFlux:
         self.loaded_lora_urls = LoadedLoRAs(main=lora_url, extra=None)
         pipe = pipe.to("cuda")
 
-    def load_multiple_loras(self, main_lora_url: str, extra_lora_url: str, model: str):
+    def load_multiple_loras(self, main_lora_url: str, extra_lora_url: str):
         pipe = self.txt2img_pipe
 
         # If no change, skip
@@ -285,9 +292,7 @@ class DiffusersFlux:
         extra_lora_path = self.weights_cache.ensure(extra_lora_url)
         pipe.load_lora_weights(extra_lora_path, adapter_name="extra")
 
-        self.loaded_lora_urls = LoadedLoRAs(
-            main=main_lora_url, extra=extra_lora_url
-        )
+        self.loaded_lora_urls = LoadedLoRAs(main=main_lora_url, extra=extra_lora_url)
         pipe = pipe.to("cuda")
 
 

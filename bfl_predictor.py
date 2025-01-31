@@ -486,9 +486,13 @@ class BflFp8Flux(LoraMixin):
         compilation_aspect_ratios: dict[str, Tuple[int, int]] = None,
         offload: bool = False,
         weights_download_cache: WeightsDownloadCache | None = None,
-        restore_lora_from_cloned_weights: bool = False
+        restore_lora_from_cloned_weights: bool = False,
     ):
-        super().__init__(weights_cache=weights_download_cache, scale_multiplier=1.5, store_clones=restore_lora_from_cloned_weights)
+        super().__init__(
+            weights_cache=weights_download_cache,
+            scale_multiplier=1.5,
+            store_clones=restore_lora_from_cloned_weights,
+        )
         self.offload = offload
 
         if torch_compile:
@@ -564,7 +568,7 @@ class BflFp8Flux(LoraMixin):
         seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
-        **kwargs
+        **kwargs,
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """Run a single prediction on the model"""
         print("running quantized prediction")
@@ -580,6 +584,7 @@ class BflFp8Flux(LoraMixin):
             strength=prompt_strength,
             num_images=num_outputs,
         )
+
 
 ###
 # util functions
