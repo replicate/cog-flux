@@ -35,3 +35,15 @@ class HFEmbedder(nn.Module):
             output_hidden_states=False,
         )
         return outputs[self.output_key]
+    
+
+class PreLoadedHFEmbedder(HFEmbedder):
+    def __init__(self, is_clip: bool, max_length: int, tokenizer, hf_module):
+        self.is_clip = is_clip
+        self.max_length = max_length
+        self.output_key = "pooler_output" if self.is_clip else "last_hidden_state"
+
+        self.tokenizer = tokenizer
+        self.hf_module = hf_module
+
+        self.hf_module = self.hf_module.eval().requires_grad_(False)

@@ -24,8 +24,9 @@ MODEL_URL_DEV = (
 )
 MODEL_URL_SCHNELL = "https://weights.replicate.delivery/default/black-forest-labs/FLUX.1-schnell/slim.tar"
 
-FLUX_DEV_PATH = Path("FLUX.1-dev")
-FLUX_SCHNELL_PATH = Path("FLUX.1-schnell")
+FLUX_DEV_PATH = Path("./model-cache/FLUX.1-dev")
+FLUX_SCHNELL_PATH = Path("./model-cache/FLUX.1-schnell")
+MODEL_CACHE = "./model-cache/"
 
 
 @dataclass
@@ -58,11 +59,11 @@ from transformers import CLIPTextModel, T5EncoderModel, CLIPTokenizer, T5Tokeniz
 
 @dataclass
 class ModelHolster:
-    vae: AutoencoderKL | None
-    text_encoder: CLIPTextModel | None
-    text_encoder_2: T5EncoderModel | None
-    tokenizer: CLIPTokenizer | None
-    tokenizer_2: T5TokenizerFast | None
+    vae: AutoencoderKL
+    text_encoder: CLIPTextModel 
+    text_encoder_2: T5EncoderModel 
+    tokenizer: CLIPTokenizer 
+    tokenizer_2: T5TokenizerFast 
 
 
 class DiffusersFlux:
@@ -70,7 +71,7 @@ class DiffusersFlux:
         self,
         model_name: str,
         weights_cache: WeightsDownloadCache,
-        shared_models: ModelHolster,
+        shared_models: ModelHolster | None = None
     ) -> None:  # pyright: ignore
         """Load the model into memory to make running multiple predictions efficient"""
         start = time.time()
@@ -89,18 +90,25 @@ class DiffusersFlux:
 
         if not os.path.exists(model_path):
             print("Model path not found, downloading models")
-            download_base_weights(model_path, Path())
+            # TODO: download everything separately; it will suck less. 
+            download_base_weights(config.url, MODEL_CACHE)
 
         print("Loading pipeline")
-        txt2img_pipe = FluxPipeline.from_pretrained(
-            model_path,
-            vae=shared_models.vae,
-            text_encoder=shared_models.text_encoder,
-            text_encoder_2=shared_models.text_encoder_2,
-            tokenizer=shared_models.tokenizer,
-            tokenizer_2=shared_models.tokenizer_2,
-            torch_dtype=torch.bfloat16,
-        ).to("cuda")
+        if shared_models:
+            txt2img_pipe = FluxPipeline.from_pretrained(
+                model_path,
+                vae=shared_models.vae,
+                text_encoder=shared_models.text_encoder,
+                text_encoder_2=shared_models.text_encoder_2,
+                tokenizer=shared_models.tokenizer,
+                tokenizer_2=shared_models.tokenizer_2,
+                torch_dtype=torch.bfloat16,
+            ).to("cuda")
+        else:
+            txt2img_pipe = FluxPipeline.from_pretrained(
+                model_path,
+                torch_dtype=torch.bfloat16,
+            ).to("cuda")
         txt2img_pipe.__class__.load_lora_into_transformer = classmethod(
             load_lora_into_transformer
         )

@@ -12,6 +12,7 @@ from bfl_predictor import (
     BflReduxPredictor,
 )
 from diffusers_predictor import DiffusersFlux
+from flux.modules.conditioner import PreLoadedHFEmbedder
 from fp8.util import LoadedModels
 
 torch.set_float32_matmul_precision("high")
@@ -714,16 +715,18 @@ class HotswapPredictor(Predictor):
         self.base_setup()
         shared_cache = WeightsDownloadCache()
 
-        # TODO: actually download and load serialized fp8 models.
         self.bf16_dev = DiffusersFlux(FLUX_DEV, shared_cache)
         shared_models = self.bf16_dev.get_models()
+
         shared_models_for_fp8 = LoadedModels(
             ae=shared_models.vae,
-            clip=shared_models.text_encoder,
-            t5=shared_models.text_encoder_2,
+            clip=PreLoadedHFEmbedder(True, 77, shared_models.tokenizer, shared_models.text_encoder),
+            t5=PreLoadedHFEmbedder(False, 512, shared_models.tokenizer_2, shared_models.text_encoder_2),
+            flow=None,
+            config=None
         )
         self.fp8_dev = BflFp8Flux(
-            FLUX_DEV_FP8,
+            FLUX_DEV,
             shared_models_for_fp8,
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
@@ -732,6 +735,8 @@ class HotswapPredictor(Predictor):
         )
 
         self.bf16_schnell = DiffusersFlux(FLUX_SCHNELL, shared_cache, shared_models)
+        shared_models_for_fp8.t5=PreLoadedHFEmbedder(False, 256, shared_models.tokenizer_2, shared_models.text_encoder_2),
+
         self.fp8_schnell = BflFp8Flux(
             FLUX_SCHNELL_FP8,
             shared_models_for_fp8,
