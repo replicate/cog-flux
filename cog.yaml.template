@@ -12,7 +12,7 @@ build:
     - "numpy<2"
     - "einops==0.8.0"
     - "fire==0.6.0"
-    - "huggingface-hub==0.24.3"
+    - "huggingface-hub==0.25.0"
     - "safetensors==0.4.3"
     - "sentencepiece==0.2.0"
     - "transformers==4.43.3"
