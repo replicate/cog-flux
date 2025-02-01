@@ -525,10 +525,9 @@ def convert_lora_weights(lora_path: str | Path, has_guidance: bool):
 
 
 @torch.inference_mode()
-def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: list[float]):
-    t = time.time()
+def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: list[float], store_clones: bool = False):
     for lora, scale in zip(lora_paths, lora_scales):
-        load_lora(model, lora, scale) 
+        load_lora(model, lora, scale, store_clones) 
 
 
 @torch.inference_mode()
@@ -568,7 +567,6 @@ def unload_loras(model: Flux):
 
 def restore_clones(model: Flux):    
     # Get all unique keys that had LoRA weights applied
-    t = time.time()
     expected_keys = set()
     for lora_weights, _ in model.lora_weights:
         keys = set(key.replace(".lora_A.weight", "")
@@ -591,7 +589,6 @@ def restore_clones(model: Flux):
         else:
             module.weight.data = clone.weight
     
-    logger.success(f"LoRAs unloaded in {time.time() - t:.2}s")
     logger.info(f"Unloaded {len(model.clones.keys())} layers")
 
     model.lora_weights = []

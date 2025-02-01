@@ -9,7 +9,7 @@ import torch
 import logging
 from PIL import Image
 from pathlib import Path
-from diffusers.pipelines.flux import (
+from diffusers.pipelines import (
     FluxPipeline,
     FluxInpaintPipeline,
     FluxImg2ImgPipeline,
@@ -24,8 +24,8 @@ MODEL_URL_DEV = (
 )
 MODEL_URL_SCHNELL = "https://weights.replicate.delivery/default/black-forest-labs/FLUX.1-schnell/slim.tar"
 
-FLUX_DEV_PATH = Path("./model-cache/FLUX.1-dev")
-FLUX_SCHNELL_PATH = Path("./model-cache/FLUX.1-schnell")
+FLUX_DEV_PATH = "./model-cache/FLUX.1-dev"
+FLUX_SCHNELL_PATH = "./model-cache/FLUX.1-schnell"
 MODEL_CACHE = "./model-cache/"
 
 
@@ -33,13 +33,14 @@ MODEL_CACHE = "./model-cache/"
 class FluxConfig:
     url: str
     path: str
+    download_path: str # this only exists b/c flux-dev needs a different donwload_path from its path on disk. TODO: fix. 
     num_steps: int
     max_sequence_length: int
 
 
 CONFIGS = {
-    "flux-schnell": FluxConfig(MODEL_URL_SCHNELL, FLUX_SCHNELL_PATH, 4, 256),
-    "flux-dev": FluxConfig(MODEL_URL_DEV, FLUX_DEV_PATH, 28, 512),
+    "flux-schnell": FluxConfig(MODEL_URL_SCHNELL, FLUX_SCHNELL_PATH, FLUX_SCHNELL_PATH, 4, 256),
+    "flux-dev": FluxConfig(MODEL_URL_DEV, FLUX_DEV_PATH, MODEL_CACHE, 28, 512),
 }
 
 # Suppress diffusers nsfw warnings
@@ -91,7 +92,7 @@ class DiffusersFlux:
         if not os.path.exists(model_path):
             print("Model path not found, downloading models")
             # TODO: download everything separately; it will suck less. 
-            download_base_weights(config.url, MODEL_CACHE)
+            download_base_weights(config.url, config.download_path)
 
         print("Loading pipeline")
         if shared_models:

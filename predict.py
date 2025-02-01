@@ -31,6 +31,7 @@ from typing import List
 from cog import BasePredictor, Input, Path  # type: ignore
 from flux.util import (
     download_weights,
+    load_ae,
 )
 
 from diffusers.pipelines.stable_diffusion.safety_checker import (
@@ -718,8 +719,11 @@ class HotswapPredictor(Predictor):
         self.bf16_dev = DiffusersFlux(FLUX_DEV, shared_cache)
         shared_models = self.bf16_dev.get_models()
 
+        # hack to get around delta in vae code
+        bfl_ae = load_ae(FLUX_DEV)
+
         shared_models_for_fp8 = LoadedModels(
-            ae=shared_models.vae,
+            ae=bfl_ae,
             clip=PreLoadedHFEmbedder(True, 77, shared_models.tokenizer, shared_models.text_encoder),
             t5=PreLoadedHFEmbedder(False, 512, shared_models.tokenizer_2, shared_models.text_encoder_2),
             flow=None,
@@ -735,7 +739,7 @@ class HotswapPredictor(Predictor):
         )
 
         self.bf16_schnell = DiffusersFlux(FLUX_SCHNELL, shared_cache, shared_models)
-        shared_models_for_fp8.t5=PreLoadedHFEmbedder(False, 256, shared_models.tokenizer_2, shared_models.text_encoder_2),
+        shared_models_for_fp8.t5=PreLoadedHFEmbedder(False, 256, shared_models.tokenizer_2, shared_models.text_encoder_2)
 
         self.fp8_schnell = BflFp8Flux(
             FLUX_SCHNELL_FP8,

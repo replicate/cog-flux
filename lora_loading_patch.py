@@ -12,7 +12,7 @@ logger = logging.get_logger(__name__)
 
 # patching inject_adapter_in_model and load_peft_state_dict with low_cpu_mem_usage=True until it's merged into diffusers
 def load_lora_into_transformer(
-    cls, state_dict, network_alphas, transformer, adapter_name=None, _pipeline=None
+    cls, state_dict, network_alphas, transformer, adapter_name=None, _pipeline=None, low_cpu_mem_usage=False
 ):
     """
     This will load the LoRA layers specified in `state_dict` into `transformer`.

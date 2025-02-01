@@ -4,6 +4,18 @@ predict:
   compare_outputs: false
   predict_timeout: 600
   test_cases:
+    # same but slower
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 28
+        guidance_scale: 2.5
+        seed: 8888
+        model: dev
+        output_format: jpg
+        go_fast: false
+        replicate_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
 
     # monalisa ~= a person
     - inputs:
@@ -72,7 +84,6 @@ predict:
         go_fast: false
         replicate_weights: fofr/flux-mona-lisa
         lora_scale: 0.9
-
 
     # same but slower
     - inputs:
