@@ -568,7 +568,7 @@ class BflFp8Flux(LoraMixin):
         seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
-        **kwargs,
+        **kwargs,  # noqa: ARG002
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """Run a single prediction on the model"""
         print("running quantized prediction")
