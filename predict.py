@@ -730,7 +730,7 @@ class HotswapPredictor(Predictor):
             config=None
         )
         self.fp8_dev = BflFp8Flux(
-            FLUX_DEV,
+            FLUX_DEV_FP8,
             shared_models_for_fp8,
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
