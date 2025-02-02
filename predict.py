@@ -724,14 +724,10 @@ class HotswapPredictor(Predictor):
 
         shared_models_for_fp8 = LoadedModels(
             ae=bfl_ae,
-            clip=PreLoadedHFEmbedder(
-                True, 77, shared_models.tokenizer, shared_models.text_encoder
-            ),
-            t5=PreLoadedHFEmbedder(
-                False, 512, shared_models.tokenizer_2, shared_models.text_encoder_2
-            ),
+            clip=PreLoadedHFEmbedder(True, 77, shared_models.tokenizer, shared_models.text_encoder),
+            t5=PreLoadedHFEmbedder(False, 512, shared_models.tokenizer_2, shared_models.text_encoder_2),
             flow=None,
-            config=None,
+            config=None
         )
         self.fp8_dev = BflFp8Flux(
             FLUX_DEV,
@@ -743,9 +739,7 @@ class HotswapPredictor(Predictor):
         )
 
         self.bf16_schnell = DiffusersFlux(FLUX_SCHNELL, shared_cache, shared_models)
-        shared_models_for_fp8.t5 = PreLoadedHFEmbedder(
-            False, 256, shared_models.tokenizer_2, shared_models.text_encoder_2
-        )
+        shared_models_for_fp8.t5=PreLoadedHFEmbedder(False, 256, shared_models.tokenizer_2, shared_models.text_encoder_2)
 
         self.fp8_schnell = BflFp8Flux(
             FLUX_SCHNELL_FP8,
