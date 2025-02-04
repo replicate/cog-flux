@@ -76,7 +76,6 @@ class LoraMixin:
             extra_lora_weights = None
 
         lora_scale = lora_scale * self.lora_scale_multiplier
-        print("lora scale", lora_scale)
         cur_lora = self.lora
         cur_extra_lora = self.extra_lora
 
