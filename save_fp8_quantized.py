@@ -4,21 +4,23 @@ from predict import DevPredictor, SchnellPredictor
 from safetensors.torch import save_file
 
 """
-Note - for this code to work, you'll need to tweak the config of the fp8 flux models in `predict.py` s.t. they load and quantize models. 
+Note - for this code to work, you'll need to tweak the config of the fp8 flux models in `predict.py` s.t. they load and quantize models.
 in practice, this just means eliminating the '-fp8' suffix on the model names.
 """
+
 
 def generate_dev_img(p, img_name="cool_dog_1234.png"):
     p.predict("a cool dog", "1:1", None, 0, 1, 28, 3, 1234, "png", 100, True, True, "1")
     os.system(f"mv out-0.png {img_name}")
+
 
 def save_dev_fp8():
     p = DevPredictor()
     p.setup()
 
     fp8_weights_path = "model-cache/dev-fp8"
-    if not os.path.exists(fp8_weights_path):
-        os.makedirs(fp8_weights_path)
+    if not os.path.exists(fp8_weights_path):  # noqa: PTH110
+        os.makedirs(fp8_weights_path)  # noqa: PTH103
 
     generate_dev_img(p)
     print(
@@ -47,8 +49,8 @@ def save_schnell_fp8():
     p.setup()
 
     fp8_weights_path = "model-cache/schnell-fp8"
-    if not os.path.exists(fp8_weights_path):
-        os.makedirs(fp8_weights_path)
+    if not os.path.exists(fp8_weights_path):  # noqa: PTH110
+        os.makedirs(fp8_weights_path)  # noqa: PTH103
 
     generate_schnell_img(p)
     print(

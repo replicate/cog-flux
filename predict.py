@@ -11,9 +11,6 @@ from bfl_predictor import (
     BflFp8Flux,
     BflReduxPredictor,
 )
-from diffusers_predictor import DiffusersFlux
-from flux.modules.conditioner import PreLoadedHFEmbedder
-from fp8.util import LoadedModels
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -31,7 +28,6 @@ from typing import List
 from cog import BasePredictor, Input, Path  # type: ignore
 from flux.util import (
     download_weights,
-    load_ae,
 )
 
 from diffusers.pipelines.stable_diffusion.safety_checker import (
@@ -715,7 +711,7 @@ class HotswapPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup()
         shared_cache = WeightsDownloadCache()
-        self.bf16_dev= BflBf16Predictor(
+        self.bf16_dev = BflBf16Predictor(
             FLUX_DEV,
             offload=self.should_offload(),
             weights_download_cache=shared_cache,
@@ -735,7 +731,7 @@ class HotswapPredictor(Predictor):
             loaded_models=self.bf16_dev.get_shared_models(),
             offload=self.should_offload(),
             weights_download_cache=shared_cache,
-            restore_lora_from_cloned_weights=True
+            restore_lora_from_cloned_weights=True,
         )
         self.fp8_schnell = BflFp8Flux(
             FLUX_SCHNELL_FP8,

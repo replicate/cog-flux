@@ -33,13 +33,15 @@ MODEL_CACHE = "./model-cache/"
 class FluxConfig:
     url: str
     path: str
-    download_path: str # this only exists b/c flux-dev needs a different donwload_path from its path on disk. TODO: fix. 
+    download_path: str  # this only exists b/c flux-dev needs a different donwload_path from its path on disk. TODO: fix.
     num_steps: int
     max_sequence_length: int
 
 
 CONFIGS = {
-    "flux-schnell": FluxConfig(MODEL_URL_SCHNELL, FLUX_SCHNELL_PATH, FLUX_SCHNELL_PATH, 4, 256),
+    "flux-schnell": FluxConfig(
+        MODEL_URL_SCHNELL, FLUX_SCHNELL_PATH, FLUX_SCHNELL_PATH, 4, 256
+    ),
     "flux-dev": FluxConfig(MODEL_URL_DEV, FLUX_DEV_PATH, MODEL_CACHE, 28, 512),
 }
 
@@ -61,10 +63,10 @@ from transformers import CLIPTextModel, T5EncoderModel, CLIPTokenizer, T5Tokeniz
 @dataclass
 class ModelHolster:
     vae: AutoencoderKL
-    text_encoder: CLIPTextModel 
-    text_encoder_2: T5EncoderModel 
-    tokenizer: CLIPTokenizer 
-    tokenizer_2: T5TokenizerFast 
+    text_encoder: CLIPTextModel
+    text_encoder_2: T5EncoderModel
+    tokenizer: CLIPTokenizer
+    tokenizer_2: T5TokenizerFast
 
 
 class DiffusersFlux:
@@ -72,7 +74,7 @@ class DiffusersFlux:
         self,
         model_name: str,
         weights_cache: WeightsDownloadCache,
-        shared_models: ModelHolster | None = None
+        shared_models: ModelHolster | None = None,
     ) -> None:  # pyright: ignore
         """Load the model into memory to make running multiple predictions efficient"""
         start = time.time()
@@ -89,9 +91,9 @@ class DiffusersFlux:
         # dependency injection hell yeah it's java time baybee
         self.weights_cache = weights_cache
 
-        if not os.path.exists(model_path):
+        if not os.path.exists(model_path):  # noqa: PTH110
             print("Model path not found, downloading models")
-            # TODO: download everything separately; it will suck less. 
+            # TODO: download everything separately; it will suck less.
             download_base_weights(config.url, config.download_path)
 
         print("Loading pipeline")
