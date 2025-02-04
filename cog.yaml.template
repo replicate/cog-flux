@@ -19,7 +19,6 @@ build:
     - "tokenizers==0.19.1"
     - "protobuf==5.27.2"
     - "diffusers==0.32.2"
-    - "peft==0.14.0"
     - "loguru==0.7.2"
     - "pybase64==1.4.0"
     - "pydash==8.0.3"
