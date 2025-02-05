@@ -724,7 +724,7 @@ class HotswapPredictor(Predictor):
         self.fp8_dev = BflFp8Flux(
             FLUX_DEV_FP8,
             loaded_models=self.bf16_dev.get_shared_models(),
-            torch_compile=False,
+            torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
             weights_download_cache=shared_cache,
@@ -740,7 +740,7 @@ class HotswapPredictor(Predictor):
         self.fp8_schnell = BflFp8Flux(
             FLUX_SCHNELL_FP8,
             loaded_models=self.bf16_dev.get_shared_models(),
-            torch_compile=False,
+            torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
             weights_download_cache=shared_cache,
