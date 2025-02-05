@@ -4,6 +4,7 @@ from predict import DevPredictor, SchnellPredictor
 from safetensors.torch import save_file
 
 """
+Code to prequantize and save fp8 weights for Dev or Schnell. Pattern should work for other models.
 Note - for this code to work, you'll need to tweak the config of the fp8 flux models in `predict.py` s.t. they load and quantize models.
 in practice, this just means eliminating the '-fp8' suffix on the model names.
 """

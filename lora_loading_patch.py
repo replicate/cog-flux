@@ -10,6 +10,7 @@ from diffusers.utils import (
 logger = logging.get_logger(__name__)
 
 
+# TODO: 99% sure this patch functionality has been merged into diffusers and we don't need it anymore.
 # patching inject_adapter_in_model and load_peft_state_dict with low_cpu_mem_usage=True until it's merged into diffusers
 def load_lora_into_transformer(
     cls,

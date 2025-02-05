@@ -53,6 +53,7 @@ class LoraMixin:
     ):
         self.lora = None
         self.lora_scale = None
+        # we apply a 1.5x multiplier to fp8 loras by default
         self.lora_scale_multiplier = scale_multiplier
         self.extra_lora = None
         self.extra_lora_scale = None
@@ -120,6 +121,8 @@ class LoraMixin:
 
 
 class BflBf16Predictor(LoraMixin):
+    """Base bf16 inference model. Supports loras w/LoraMixin"""
+
     def __init__(
         self,
         flow_model_name: str,
@@ -184,6 +187,7 @@ class BflBf16Predictor(LoraMixin):
                 torch.cuda.empty_cache()
 
     def prepare_init_image(self, image_path: Path) -> tuple[torch.Tensor, int, int]:
+        """prepares image for img2img inference using flux dev"""
         torch_device = torch.device("cuda")
 
         print("Image detected - setting to img2img mode")
@@ -205,6 +209,7 @@ class BflBf16Predictor(LoraMixin):
         width: int,
         height: int,
     ) -> tuple[Tensor, Tensor, Tensor]:
+        """Preprocesses mask for inpainting using flux-dev, NOT using flux-fill"""
         image = Image.open(mask_path).convert("L")
         transform = transforms.Compose(
             [
@@ -249,12 +254,10 @@ class BflBf16Predictor(LoraMixin):
         conditioning_kwargs: dict = {},
         prepare_kwargs: dict = {},
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
-        """Run a single prediction on the model"""
         torch_device = torch.device("cuda")
         init_image = None
         img_cond = None
 
-        # invariable
         if not seed:
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
@@ -264,14 +267,13 @@ class BflBf16Predictor(LoraMixin):
                 height=height, width=width, **conditioning_kwargs
             )
 
-        # dev & hotswap
+        # used for flux-dev & hotswap img2img
         if legacy_image_path is not None and img_cond is None:
             # For backwards compatibility, we still preserve width and
             # height for init_images, as opposed to using megapixels
             # with a "match_input" value.
             init_image, width, height = self.prepare_init_image(legacy_image_path)
 
-        # invariable
         x = get_noise(
             num_outputs,
             height,
@@ -282,11 +284,11 @@ class BflBf16Predictor(LoraMixin):
         )
         timesteps = get_schedule(
             num_inference_steps,
-            # equivalent to inp["img"].shape[1], needs to be here for prompt strength in img2img
-            (x.shape[-1] * x.shape[-2]) // 4,
+            (x.shape[-1] * x.shape[-2]) // 4,  # equivalent to inp["img"].shape[1] below
             shift=self.shift,
         )
-        # dev & hotswap
+
+        # used for flux-dev & hotswap img2img
         if init_image is not None:
             t_idx = int((1.0 - prompt_strength) * num_inference_steps)
             t = timesteps[t_idx]
@@ -302,7 +304,7 @@ class BflBf16Predictor(LoraMixin):
         if img_cond is not None:
             inp["img_cond"] = img_cond
 
-        # Hotswap
+        # hotswap inpainting
         if legacy_mask_path:
             assert init_image is not None, "Init image is not set when mask is set"
             inp["mask"], inp["noise"], inp["image_latents"] = self.prepare_legacy_mask(
@@ -356,8 +358,9 @@ class BflBf16Predictor(LoraMixin):
 
 class BflReduxPredictor(BflBf16Predictor):
     """
-    To use, pass redux_img_path into predict as a kwarg
-    Not ideal, least unpleasant way I've found to unpack this.
+    Works for dev and schnell.
+    To use, pass path to redux image into predict as a prepare_kwargs - e.g.:
+        redux_predictor.predict(..., prepare_kwargs={"redux_img_path": redux_image}
     """
 
     def __init__(
@@ -378,6 +381,7 @@ class BflReduxPredictor(BflBf16Predictor):
         self.redux_image_encoder = load_redux(device="cuda")
 
     def prepare(self, x, prompt, redux_img_path=None):
+        """Overrides prepare in order to properly preprocess redux image"""
         return prepare_redux(
             self.t5,
             self.clip,
@@ -389,6 +393,12 @@ class BflReduxPredictor(BflBf16Predictor):
 
 
 class BflFillFlux(BflBf16Predictor):
+    """
+    Works for flux fill.
+    To use, pass image and mask into predict as conditioning_kwargs - e.g.:
+        fill_predictor.predict(..., conditioning_kwargs={"image_path": image, "mask_path": mask},)
+    """
+
     def prepare_conditioning(
         self,
         image_path: Path,
@@ -434,8 +444,9 @@ class BflFillFlux(BflBf16Predictor):
 
 class BflControlNetFlux(BflBf16Predictor):
     """
-    To use, pass proper conditioning kwargs into predict.
-    Not ideal, least unpleasant way I've found to unpack this.
+    Works for flux canny & depth.
+    To use, pass image and mask into predict as conditioning_kwargs - e.g.:
+        control_predictor.predict(...,conditioning_kwargs={"image_path": control_image},)
     """
 
     def __init__(
@@ -453,6 +464,7 @@ class BflControlNetFlux(BflBf16Predictor):
             offload=offload,
             weights_download_cache=weights_download_cache,
         )
+        # should be able to add new controlnets here as they come out as long as they pass conditioning images in the same way
         if self.flow_model_name == "flux-depth-dev":
             self.control_image_embedder = load_depth_encoder("cuda")
         elif self.flow_model_name == "flux-canny-dev":
@@ -479,6 +491,14 @@ class BflControlNetFlux(BflBf16Predictor):
 
 
 class BflFp8Flux(LoraMixin):
+    """
+    Fp8 support for dev and schnell.
+    Supports loras and torch compilation.
+
+    To download and use prequantized weights, pass in `flux-dev/schnell-fp8`; otherwise pass in `flux-dev/schnell`.
+    Configs are in fp8/configs
+    """
+
     def __init__(
         self,
         flow_model_name: str,
@@ -522,7 +542,7 @@ class BflFp8Flux(LoraMixin):
         )
         self.num_steps = 4 if "schnell" in flow_model_name else 28
 
-        # hack to expose this to lora loading
+        # hack to expose this for lora loading mixin
         self.model = self.fp8_pipe.model
 
         if torch_compile:
@@ -538,6 +558,7 @@ class BflFp8Flux(LoraMixin):
                 compiling=True,
             )
 
+            # need to pre-warm cudnn kernels or else we take a 2 sec latency hit
             for k, v in compilation_aspect_ratios.items():
                 print(f"warming kernel for {k}")
                 width, height = v

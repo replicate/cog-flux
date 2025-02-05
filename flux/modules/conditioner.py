@@ -38,6 +38,9 @@ class HFEmbedder(nn.Module):
     
 
 class PreLoadedHFEmbedder(nn.Module):
+    """
+    Does the same thing as the HFEmbedder, but lets you share the tokenizer & hf module. Could also just share the HFEmbedder but here we are.
+    """
     def __init__(self, is_clip: bool, max_length: int, tokenizer, hf_module):
         super().__init__()
         self.is_clip = is_clip

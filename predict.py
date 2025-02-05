@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import os
-from typing import Any, Tuple
+from typing import Tuple
 
 import torch
 
@@ -158,9 +158,13 @@ class Inputs:
 
 class Predictor(BasePredictor, ABC):
     """
-    honestly there's probably more refactoring to be done here; this should be a separate object and not an abstract base class.
-    it has no need to be a predictor.
-    but here we are for now.
+    Base object with shared flux pre & post-processing functionality (e.g. safety checking) that doesn't depend on implementation.
+    The goal here, broadly, is to decouple the Cog and therefore Replicate API for flux (defined by this object and its child classes)
+    from the actual inference implementation (defined by the various objects that the child classes instantiate in their setup() fucntions).
+
+    This enables decoupling bf16 implementations from fp8 implementations, and hosting multiple implementations in the same model.
+
+    All child objects need to implement the Cog `setup` and `predict` functions.
     """
 
     def setup(self) -> None:
@@ -955,14 +959,6 @@ class DepthDevPredictor(Predictor):
             output_quality,
             np_images=np_imgs,
         )
-
-
-class TestPredictor(Predictor):
-    def setup(self) -> None:
-        self.num = 3
-
-    def predict(self, how_many: int = Input(description="how many", ge=0)) -> Any:
-        return self.num + how_many
 
 
 def make_multiple_of_16(n):

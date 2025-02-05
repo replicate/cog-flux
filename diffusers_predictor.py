@@ -33,7 +33,7 @@ MODEL_CACHE = "./model-cache/"
 class FluxConfig:
     url: str
     path: str
-    download_path: str  # this only exists b/c flux-dev needs a different donwload_path from its path on disk. TODO: fix.
+    download_path: str  # this only exists b/c flux-dev needs a different donwload_path from "path" based on how we're storing weights.
     num_steps: int
     max_sequence_length: int
 
@@ -70,6 +70,10 @@ class ModelHolster:
 
 
 class DiffusersFlux:
+    """
+    Wrapper to map diffusers flux pipeline to the methods we need to serve these models in predict.py
+    """
+
     def __init__(
         self,
         model_name: str,

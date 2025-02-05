@@ -532,6 +532,11 @@ def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: lis
 
 @torch.inference_mode()
 def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store_clones: bool = False):
+    """
+    Loads lora weights. 
+    
+    If store_clones is set, stores backup copy of base weights in vram, and simply overwrites merged lora weights w/backup copy on unmerge.
+    """
     t = time.time()
     has_guidance = model.params.guidance_embed
 
@@ -549,13 +554,16 @@ def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store
 
 @torch.inference_mode()
 def unload_loras(model: Flux):
+    """
+    Unmerges or overwrites lora weights depending on how loras have been stored. 
+    """
     t = time.time()
     if not hasattr(model, "lora_weights") or not model.lora_weights:
         return
 
     if hasattr(model, "clones") and len(model.clones) > 0:
         # restore original weights from backup copy in vram
-        restore_clones(model)
+        restore_base_weights(model)
     else:
         for lora_weights, lora_scale in model.lora_weights[::-1]:
             # subtract lora from merged weights
@@ -565,7 +573,7 @@ def unload_loras(model: Flux):
     model.lora_weights = []
 
 
-def restore_clones(model: Flux):    
+def restore_base_weights(model: Flux):    
     # Get all unique keys that had LoRA weights applied
     expected_keys = set()
     for lora_weights, _ in model.lora_weights:
