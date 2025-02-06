@@ -156,7 +156,7 @@ class FluxPipeline:
             scale (float): Scaling factor for the LoRA weights.
 
         """
-        self.model = lora_loading.apply_lora_to_model(self.model, lora_path, scale)
+        self.model = lora_loading.apply_lora_to_model_and_optionally_store_clones(self.model, lora_path, scale)
 
     @torch.inference_mode()
     def compile(self):
