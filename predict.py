@@ -11,6 +11,9 @@ from bfl_predictor import (
     BflFp8Flux,
     BflReduxPredictor,
 )
+from diffusers_predictor import DiffusersFlux
+from flux.modules.conditioner import PreLoadedHFEmbedder
+from fp8.util import LoadedModels
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -28,6 +31,7 @@ from typing import List
 from cog import BasePredictor, Input, Path  # type: ignore
 from flux.util import (
     download_weights,
+    load_ae,
 )
 
 from diffusers.pipelines.stable_diffusion.safety_checker import (
@@ -715,34 +719,43 @@ class HotswapPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup()
         shared_cache = WeightsDownloadCache()
-        self.bf16_dev = BflBf16Predictor(
-            FLUX_DEV,
-            offload=self.should_offload(),
-            weights_download_cache=shared_cache,
-            restore_lora_from_cloned_weights=True,
+
+        self.bf16_dev = DiffusersFlux(FLUX_DEV, shared_cache)
+        shared_models = self.bf16_dev.get_models()
+
+        # hack to get around delta in vae code
+        bfl_ae = load_ae(FLUX_DEV)
+
+        shared_models_for_fp8 = LoadedModels(
+            ae=bfl_ae,
+            clip=PreLoadedHFEmbedder(
+                True, 77, shared_models.tokenizer, shared_models.text_encoder
+            ),
+            t5=PreLoadedHFEmbedder(
+                False, 512, shared_models.tokenizer_2, shared_models.text_encoder_2
+            ),
+            flow=None,
+            config=None,
         )
         self.fp8_dev = BflFp8Flux(
             FLUX_DEV_FP8,
-            loaded_models=self.bf16_dev.get_shared_models(),
+            shared_models_for_fp8,
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
-            offload=self.should_offload(),
             weights_download_cache=shared_cache,
             restore_lora_from_cloned_weights=True,
         )
-        self.bf16_schnell = BflBf16Predictor(
-            FLUX_SCHNELL,
-            loaded_models=self.bf16_dev.get_shared_models(),
-            offload=self.should_offload(),
-            weights_download_cache=shared_cache,
-            restore_lora_from_cloned_weights=True,
+
+        self.bf16_schnell = DiffusersFlux(FLUX_SCHNELL, shared_cache, shared_models)
+        shared_models_for_fp8.t5 = PreLoadedHFEmbedder(
+            False, 256, shared_models.tokenizer_2, shared_models.text_encoder_2
         )
+
         self.fp8_schnell = BflFp8Flux(
             FLUX_SCHNELL_FP8,
-            loaded_models=self.bf16_dev.get_shared_models(),
+            shared_models_for_fp8,
             torch_compile=True,
             compilation_aspect_ratios=ASPECT_RATIOS,
-            offload=self.should_offload(),
             weights_download_cache=shared_cache,
             restore_lora_from_cloned_weights=True,
         )
@@ -858,9 +871,6 @@ class HotswapPredictor(Predictor):
             width=width,
             height=height,
         )
-
-        # unload loras s.t. everything fits in memory
-        model.handle_loras(None, 1.0, None, 1.0)
 
         return self.postprocess(
             imgs,
