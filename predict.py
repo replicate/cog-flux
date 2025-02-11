@@ -716,7 +716,7 @@ class FillDevPredictor(Predictor):
 
 
 class HotswapPredictor(Predictor):
-    def setup(self) -> None:
+    def setup(self, torch_compile=True) -> None:
         self.base_setup()
         shared_cache = WeightsDownloadCache()
 
@@ -740,7 +740,7 @@ class HotswapPredictor(Predictor):
         self.fp8_dev = BflFp8Flux(
             FLUX_DEV_FP8,
             shared_models_for_fp8,
-            torch_compile=True,
+            torch_compile=torch_compile,
             compilation_aspect_ratios=ASPECT_RATIOS,
             weights_download_cache=shared_cache,
             restore_lora_from_cloned_weights=True,
@@ -754,7 +754,7 @@ class HotswapPredictor(Predictor):
         self.fp8_schnell = BflFp8Flux(
             FLUX_SCHNELL_FP8,
             shared_models_for_fp8,
-            torch_compile=True,
+            torch_compile=torch_compile,
             compilation_aspect_ratios=ASPECT_RATIOS,
             weights_download_cache=shared_cache,
             restore_lora_from_cloned_weights=True,
