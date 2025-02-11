@@ -28,7 +28,7 @@ FLUX_DEV_PATH = "./model-cache/FLUX.1-dev"
 FLUX_SCHNELL_PATH = "./model-cache/FLUX.1-schnell"
 MODEL_CACHE = "./model-cache/"
 
-MAX_IMAGE_SIZE=1440
+MAX_IMAGE_SIZE = 1440
 
 
 @dataclass
@@ -228,7 +228,7 @@ class DiffusersFlux:
             if scale < 1:
                 width = int(width * scale)
                 height = int(height * scale)
-                
+
             # Calculate dimensions that are multiples of 16
             target_width = make_multiple_of_16(width)
             target_height = make_multiple_of_16(height)
