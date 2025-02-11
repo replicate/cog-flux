@@ -28,6 +28,8 @@ FLUX_DEV_PATH = "./model-cache/FLUX.1-dev"
 FLUX_SCHNELL_PATH = "./model-cache/FLUX.1-schnell"
 MODEL_CACHE = "./model-cache/"
 
+MAX_IMAGE_SIZE = 1440
+
 
 @dataclass
 class FluxConfig:
@@ -217,9 +219,19 @@ class DiffusersFlux:
             input_image = Image.open(legacy_image_path).convert("RGB")
             original_width, original_height = input_image.size
 
+            width = original_width
+            height = original_height
+            print(f"Input image size: {width}x{height}")
+
+            # Calculate the scaling factor if the image exceeds max_image_size
+            scale = min(MAX_IMAGE_SIZE / width, MAX_IMAGE_SIZE / height, 1)
+            if scale < 1:
+                width = int(width * scale)
+                height = int(height * scale)
+
             # Calculate dimensions that are multiples of 16
-            target_width = make_multiple_of_16(original_width)
-            target_height = make_multiple_of_16(original_height)
+            target_width = make_multiple_of_16(width)
+            target_height = make_multiple_of_16(height)
             target_size = (target_width, target_height)
 
             print(
