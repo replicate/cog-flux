@@ -13,7 +13,6 @@ if [ -z $1 ]; then
     exit 1
 fi
 
-cat cog.yaml.template > cog.yaml
-cat model-cog-configs/$1.yaml >> cog.yaml
+yq eval-all 'select(fileIndex == 0) *+ select(fileIndex == 1)' cog.yaml.template "model-cog-configs/$1.yaml" > cog.yaml
 
 cp safe-push-configs/$1.yaml cog-safe-push.yaml
