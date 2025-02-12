@@ -182,11 +182,3 @@ predict:
         extra_lora: fofr/flux-mona-lisa
         extra_lora_scale: 0.9
       match_prompt: An image of a woman at a dinner table who looks like the Mona Lisa
-
-
-  fuzz:
-    fixed_inputs:
-      replicate_weights: fofr/flux-90s-power-rangers
-    disabled_inputs:
-      - extra_lora
-    iterations: 10
