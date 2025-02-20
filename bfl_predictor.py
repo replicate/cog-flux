@@ -30,7 +30,7 @@ from flux.util import (
     load_t5,
 )
 from fp8.flux_pipeline import FluxPipeline
-from fp8.lora_loading import load_lora, load_loras, unload_loras
+from fp8.lora_loading import load_loras, unload_loras
 from fp8.util import LoadedModels
 from weights import WeightsDownloadCache
 
@@ -96,23 +96,21 @@ class LoraMixin:
                 if self.lora or self.extra_lora:
                     unload_loras(model)
                 lora_path = self.weights_cache.ensure(lora_weights)
+                paths = [lora_path]
+                scales = [lora_scale]
                 if extra_lora_weights:
                     extra_lora_path = self.weights_cache.ensure(extra_lora_weights)
-                    load_loras(
-                        model,
-                        [lora_path, extra_lora_path],
-                        [lora_scale, extra_lora_scale],
-                        self.store_clones,
-                    )
-                else:
-                    load_lora(model, lora_path, lora_scale, self.store_clones)
+                    paths.append(extra_lora_path)
+                    scales.append(extra_lora_scale)
+                load_loras(model, paths, scales, self.store_clones, self.clip)
+
             else:
                 print(f"Lora {lora_weights} already loaded")
                 if extra_lora_weights:
                     print(f"Extra lora {extra_lora_weights} already loaded")
 
         elif self.lora:
-            unload_loras(model)
+            unload_loras(model, self.clip)
 
         self.lora = lora_weights
         self.lora_scale = lora_scale
@@ -544,6 +542,7 @@ class BflFp8Flux(LoraMixin):
 
         # hack to expose this for lora loading mixin
         self.model = self.fp8_pipe.model
+        self.clip = self.fp8_pipe.clip
 
         if torch_compile:
             print("compiling fp8 model")

@@ -5,6 +5,9 @@ import torch
 from loguru import logger
 from safetensors.torch import load_file
 from tqdm import tqdm
+from diffusers.loaders.lora_base import _load_lora_into_text_encoder, set_adapters_for_text_encoder, _remove_text_encoder_monkey_patch
+from transformers import CLIPTextModel
+
 
 try:
     from cublas_ops import CublasLinear
@@ -510,6 +513,10 @@ def convert_lora_weights(lora_path: str | Path, has_guidance: bool):
     is_xlabs = any("processor" in k for k in lora_weights)
     if is_xlabs:
         lora_weights = _convert_xlabs_flux_lora_to_diffusers(lora_weights)
+    
+    text_encoder_weights = {k: v for k, v in lora_weights.items() if k.startswith("text_encoder.")}
+    if len(text_encoder_weights) > 0:
+        logger.info("text encoder weights found")
 
     check_if_starts_with_transformer = [
         k for k in lora_weights.keys() if k.startswith("transformer.")
@@ -520,18 +527,27 @@ def convert_lora_weights(lora_path: str | Path, has_guidance: bool):
         )
     else:
         lora_weights = convert_from_original_flux_checkpoint(lora_weights)
+
     logger.info("LoRA weights loaded")
-    return lora_weights
+    return lora_weights, text_encoder_weights
 
 
 @torch.inference_mode()
-def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: list[float], store_clones: bool = False):
+def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: list[float], store_clones: bool = False, text_encoder: CLIPTextModel | None = None):
+    ind = 0
+    names = []
     for lora, scale in zip(lora_paths, lora_scales):
-        load_lora(model, lora, scale, store_clones) 
+        _load_lora(model, lora, scale, store_clones=store_clones, text_encoder=text_encoder, adapter_name=f"lora_{ind}")
+        names.append(f"lora_{ind}")
+        ind += 1
+    
+    # for multi lora, scale is improperly set w/_load_lora_into_text_encoder. 
+    if hasattr(model, 'text_encoder_lora') and model.text_encoder_lora and any([val != 1.0 for val in lora_scales]):
+        set_adapters_for_text_encoder(names, text_encoder, lora_scales)
 
 
 @torch.inference_mode()
-def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store_clones: bool = False):
+def _load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store_clones: bool = False, text_encoder: CLIPTextModel | None = None):
     """
     Loads lora weights. 
     
@@ -540,10 +556,25 @@ def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store
     t = time.time()
     has_guidance = model.params.guidance_embed
 
-    lora_weights = convert_lora_weights(lora_path, has_guidance)
+    lora_weights, text_encoder_weights = convert_lora_weights(lora_path, has_guidance,)
 
     apply_lora_to_model_and_optionally_store_clones(model, lora_weights, lora_scale, store_clones)
 
+    if len(text_encoder_weights) > 0:
+        # load text encoder weights
+        print("loading text encoder lora")
+
+        alphas = {}
+        alpha_keys = [k for k in text_encoder_weights if 'alpha' in k]
+
+        for k in alpha_keys:
+            # these should be in the form of 'some.parameter.name.alpha'
+            alphas[k] = text_encoder_weights.pop(k)
+
+        # scaling loras via this method actually has a weird multiplicative effect if we load two in a row. 
+        _load_lora_into_text_encoder(text_encoder_weights, alphas, text_encoder, lora_scale=1.0, low_cpu_mem_usage=True)
+        model.text_encoder_lora = True
+        
     logger.success(f"LoRA applied in {time.time() - t:.2}s")
 
     if hasattr(model, "lora_weights"):
@@ -553,7 +584,7 @@ def load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store
 
 
 @torch.inference_mode()
-def unload_loras(model: Flux):
+def unload_loras(model: Flux, text_encoder: CLIPTextModel):
     """
     Unmerges or overwrites lora weights depending on how loras have been stored. 
     """
@@ -568,6 +599,10 @@ def unload_loras(model: Flux):
         for lora_weights, lora_scale in model.lora_weights[::-1]:
             # subtract lora from merged weights
             apply_lora_to_model_and_optionally_store_clones(model, lora_weights, -lora_scale, False)
+
+    if hasattr(model, "text_encoder_lora") and model.text_encoder_lora:
+        _remove_text_encoder_monkey_patch(text_encoder)
+        model.text_encoder_lora = False
     logger.success(f"LoRAs unloaded in {time.time() - t:.2}s")
 
     model.lora_weights = []
