@@ -31,7 +31,12 @@ from flux.util import (
     load_t5,
 )
 from fp8.flux_pipeline import FluxPipeline
-from fp8.lora_loading import disable_text_encoder_loras, load_loras, set_text_encoder_lora_weights, unload_loras
+from fp8.lora_loading import (
+    disable_text_encoder_loras,
+    load_loras,
+    set_text_encoder_lora_weights,
+    unload_loras,
+)
 from fp8.util import LoadedModels
 from weights import WeightsDownloadCache
 
@@ -123,7 +128,7 @@ class LoraMixin:
             if self.lora:
                 unload_loras(model, self.clip, self.id)
 
-            # turn off all loras for text encoder; other model may have added them in. 
+            # turn off all loras for text encoder; other model may have added them in.
             disable_text_encoder_loras(self.clip)
 
         self.lora = lora_weights
