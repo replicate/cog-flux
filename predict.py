@@ -484,7 +484,7 @@ class SchnellLoraPredictor(Predictor):
 
 
 class DevLoraPredictor(Predictor):
-    def setup(self) -> None:
+    def setup(self, torch_compile=True) -> None:
         self.base_setup()
         cache = WeightsDownloadCache()
         self.bf16_model = BflBf16Predictor(
@@ -496,7 +496,7 @@ class DevLoraPredictor(Predictor):
         self.fp8_model = BflFp8Flux(
             FLUX_DEV_FP8,
             loaded_models=self.bf16_model.get_shared_models(),
-            torch_compile=True,
+            torch_compile=torch_compile,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
             weights_download_cache=cache,
