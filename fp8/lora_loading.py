@@ -329,7 +329,7 @@ def convert_diffusers_to_flux_transformer_checkpoint(
         "final_layer.adaLN_modulation.1.weight",
     )
     if len(list(diffusers_state_dict.keys())) > 0:
-        logger.warning("Unexpected keys:", diffusers_state_dict.keys())
+        logger.warning(f"Unexpected keys: {','.join(diffusers_state_dict.keys())}")
 
     return original_state_dict
 
@@ -514,10 +514,15 @@ def convert_lora_weights(lora_path: str | Path, has_guidance: bool):
     is_xlabs = any("processor" in k for k in lora_weights)
     if is_xlabs:
         lora_weights = _convert_xlabs_flux_lora_to_diffusers(lora_weights)
+
     
-    text_encoder_weights = {k: v for k, v in lora_weights.items() if k.startswith("text_encoder.")}
-    if len(text_encoder_weights) > 0:
+    
+    text_encoder_keys = [k for k in lora_weights.keys() if k.startswith("text_encoder.")]
+    text_encoder_weights = {}
+    if len(text_encoder_keys) > 0:
         logger.info("text encoder weights found")
+        for k in text_encoder_keys:
+            text_encoder_weights[k] = lora_weights.pop(k)
 
     check_if_starts_with_transformer = [
         k for k in lora_weights.keys() if k.startswith("transformer.")
