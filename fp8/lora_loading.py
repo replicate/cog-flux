@@ -8,7 +8,18 @@ from tqdm import tqdm
 from diffusers.loaders.lora_base import _load_lora_into_text_encoder
 from diffusers.utils.peft_utils import set_weights_and_activate_adapters, set_adapter_layers, delete_adapter_layers
 from transformers import CLIPTextModel
+from peft.tuners.tuners_utils import BaseTunerLayer
 
+def set_adapter_no_grad(self, adapter_names):
+    if isinstance(adapter_names, str):
+        adapter_names = [adapter_names]
+    self._active_adapter = adapter_names
+
+def enable_adapter_no_grad(self):
+    self._disable_adapters = False
+
+BaseTunerLayer.set_adapter_no_grad = set_adapter_no_grad
+BaseTunerLayer.enable_adapter_no_grad = enable_adapter_no_grad
 
 try:
     from cublas_ops import CublasLinear
@@ -554,7 +565,18 @@ def set_text_encoder_lora_weights(text_encoder: CLIPTextModel, base_lora_name: s
     if hasattr(text_encoder, 'peft_config'):
         valid_names_and_scales = [(name, scale) for name, scale in zip(adapter_names, lora_scales) if name in text_encoder.peft_config]
         if len(valid_names_and_scales) > 0:
-            set_weights_and_activate_adapters(text_encoder, [val[0] for val in valid_names_and_scales], [val[1] for val in valid_names_and_scales])
+            for _, module in text_encoder.named_modules():
+                if isinstance(module, BaseTunerLayer):
+                    # module.set_adapter inexplicably sets "requires_grad=True", which borks our code b/c we do things at inference time
+                    if hasattr(module, "set_adapter"):
+                        for lora_name, lora_scale in valid_names_and_scales:
+                            module.set_scale(lora_name, lora_scale)
+                        module.set_adapter_no_grad([val[0] for val in valid_names_and_scales])
+                        module.enable_adapter_no_grad()
+                    else:
+                        raise Exception("update your peft")
+
+            #set_weights_and_activate_adapters(text_encoder, [val[0] for val in valid_names_and_scales], [val[1] for val in valid_names_and_scales])
 
 
 @torch.inference_mode()

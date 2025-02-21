@@ -94,6 +94,9 @@ class LoraMixin:
         self.extra_lora = loading
         model = self.model
 
+        # b/c CLIP is shared amongst modules, we need to make sure it's in the right state
+        disable_text_encoder_loras(self.clip.hf_module)
+
         if lora_weights:
             # since we merge weights, need to reload for change in scale. auto-reloading for extra weights
             if (
@@ -127,9 +130,6 @@ class LoraMixin:
         else:
             if self.lora:
                 unload_loras(model, self.clip.hf_module, self.id)
-
-            # b/c CLIP is shared amongst modules, we need to make sure it's in the right state
-            disable_text_encoder_loras(self.clip.hf_module)
 
         self.lora = lora_weights
         self.lora_scale = lora_scale

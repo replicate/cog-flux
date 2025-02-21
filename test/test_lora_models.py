@@ -100,21 +100,52 @@ def test_text_encoder_lora(uncompiled_dev_lora_predictor):
     )
     os.system("mv out-0.png book_2.png")
 
-    dog_one = Image.open("cyberdog_1.png")
-    dog_two = Image.open("cyberdog_2.png")
+    assert_same_imgs("cyberdog_1.png", "cyberdog_2.png")
+    assert_same_imgs("book_1.png", "book_2.png")
 
-    book_one = Image.open("book_1.png")
-    book_two = Image.open("book_2.png")
+    # # run same predictions in fp8, assert that nothing's changed
+    base_in['go_fast'] = True
+    te_in['go_fast'] = True
+    
+    p.predict(**base_in)
+    os.system("mv out-0.png fast_dog_1.png")
 
-    assert dog_one.size == dog_two.size
-    assert book_one.size == book_two.size
+    p.predict(**te_in)
+    os.system("mv out-0.png fast_book_1.png")
+
+    p.predict(**base_in)
+    os.system("mv out-0.png fast_dog_2.png")
+
+    p.predict(**te_in)
+    os.system("mv out-0.png fast_book_2.png")
+
+    assert_same_imgs("fast_dog_1.png", "fast_dog_2.png")
+    assert_same_imgs("fast_book_1.png", "fast_book_2.png")
+
+    te_in['go_fast'] = False
+    base_in['go_fast'] = False
+
+    p.predict(
+        **te_in
+    )
+    os.system("mv out-0.png book_3.png")
+
+    p.predict(
+        **base_in
+    )
+    os.system("mv out-0.png cyberdog_3.png")
+
+    assert_same_imgs("cyberdog_1.png", "cyberdog_3.png")
+    assert_same_imgs("book_1.png", "book_3.png")
+
+def assert_same_imgs(path_1, path_2):
+    img_1 = Image.open(path_1)
+    img_2 = Image.open(path_2)
+
+    assert img_1.size == img_2.size
 
     # Check if the images are the same
-    # TODO - may need to replace with a fuzzy similarity check
-    dog_one_hash = hashlib.md5(dog_one.tobytes()).hexdigest()
-    dog_two_hash = hashlib.md5(dog_two.tobytes()).hexdigest()
-    book_one_hash = hashlib.md5(book_one.tobytes()).hexdigest()
-    book_two_hash = hashlib.md5(book_two.tobytes()).hexdigest()
+    img_one_hash = hashlib.md5(img_1.tobytes()).hexdigest()
+    img_two_hash = hashlib.md5(img_2.tobytes()).hexdigest()
 
-    assert dog_one_hash == dog_two_hash
-    assert book_one_hash == book_two_hash
+    assert img_one_hash == img_two_hash
