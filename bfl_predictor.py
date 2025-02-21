@@ -121,14 +121,14 @@ class LoraMixin:
                     print(f"Extra lora {extra_lora_weights} already loaded")
                     scales.append(self.extra_lora_scale)
 
-                # b/c CLIP is shared amongst modules, we need to reload text encoder scale
+                # b/c CLIP is shared amongst modules, we need to make sure it's in the right state
                 set_text_encoder_lora_weights(self.clip, self.id, scales)
 
         else:
             if self.lora:
                 unload_loras(model, self.clip, self.id)
 
-            # turn off all loras for text encoder; other model may have added them in.
+            # b/c CLIP is shared amongst modules, we need to make sure it's in the right state
             disable_text_encoder_loras(self.clip)
 
         self.lora = lora_weights

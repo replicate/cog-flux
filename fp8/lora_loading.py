@@ -588,7 +588,7 @@ def _load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, stor
 
 
 @torch.inference_mode()
-def unload_loras(model: Flux, text_encoder: CLIPTextModel, base_adapter_name: str):
+def unload_loras(model: Flux, text_encoder: CLIPTextModel, base_lora_name: str):
     """
     Unmerges or overwrites lora weights depending on how loras have been stored. 
     """
@@ -605,8 +605,7 @@ def unload_loras(model: Flux, text_encoder: CLIPTextModel, base_adapter_name: st
             apply_lora_to_model_and_optionally_store_clones(model, lora_weights, -lora_scale, False)
 
     if hasattr(text_encoder, "peft_config"):
-        # TODO: don't love how hardcoded this is. 
-        for adapter_name in [f"{base_adapter_name}_{val}" for val in range(2)]:
+        for adapter_name in [f"{base_lora_name}_{val}" for val in range(2)]:
             if adapter_name in text_encoder.peft_config:
                 delete_adapter_layers(text_encoder, adapter_name)
         
