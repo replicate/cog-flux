@@ -64,13 +64,14 @@ def test_text_encoder_lora(uncompiled_dev_lora_predictor):
         "go_fast": False,
         "lora_weights": "fofr/flux-80s-cyberpunk",
         "lora_scale":1.5,
-        "output_format": "png"
+        "output_format": "png",
+        "seed": 42
     }
 
     text_encoder_lora_prediction = {
         "prompt": "cy04, a book titled Did I Leave The Oven On?, an illustration of a man sitting at work, looking worried, thought bubble above his head with an oven in it",
         "num_inference_steps": 28,
-        "guidance_scale": 3.5,
+        "guidance": 3.5,
         "seed": 1234,
         "go_fast": False,
         "lora_weights": "huggingface.co/Purz/choose-your-own-adventure",

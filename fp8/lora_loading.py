@@ -537,10 +537,11 @@ def convert_lora_weights(lora_path: str | Path, has_guidance: bool):
 def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: list[float], store_clones: bool = False, text_encoder: CLIPTextModel | None = None, base_lora_name: str = "default"):
     ind = 0
     for lora, scale in zip(lora_paths, lora_scales):
-        _load_lora(model, lora, scale, store_clones=store_clones, text_encoder=text_encoder, adapter_name=f"{base_lora_name}_{ind}")
+        _load_lora(model, lora, scale, store_clones=store_clones, text_encoder=text_encoder, lora_name=f"{base_lora_name}_{ind}")
         ind += 1    
     
     set_text_encoder_lora_weights(text_encoder, base_lora_name, lora_scales)
+
 
 def set_text_encoder_lora_weights(text_encoder: CLIPTextModel, base_lora_name: str, lora_scales: list[float]):
     # for multi lora, scale is improperly set w/_load_lora_into_text_encoder. 
@@ -552,7 +553,7 @@ def set_text_encoder_lora_weights(text_encoder: CLIPTextModel, base_lora_name: s
 
 
 @torch.inference_mode()
-def _load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store_clones: bool = False, text_encoder: CLIPTextModel | None = None):
+def _load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, store_clones: bool = False, text_encoder: CLIPTextModel | None = None, lora_name: str = "default"):
     """
     Loads lora weights. 
     
@@ -577,7 +578,7 @@ def _load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, stor
             alphas[k] = text_encoder_weights.pop(k)
 
         # scaling loras via this method actually has a weird multiplicative effect if we load two in a row. 
-        _load_lora_into_text_encoder(text_encoder_weights, alphas, text_encoder, lora_scale=1.0, low_cpu_mem_usage=True)
+        _load_lora_into_text_encoder(text_encoder_weights, alphas, text_encoder, lora_scale=1.0, low_cpu_mem_usage=True, adapter_name=lora_name)
         
     logger.success(f"LoRA applied in {time.time() - t:.2}s")
 
@@ -606,7 +607,9 @@ def unload_loras(model: Flux, text_encoder: CLIPTextModel, base_lora_name: str):
 
     if hasattr(text_encoder, "peft_config"):
         for adapter_name in [f"{base_lora_name}_{val}" for val in range(2)]:
-            if adapter_name in text_encoder.peft_config:
+            # peft_config will go away if we delete the last lora, so need to check for it on every iteration
+            if hasattr(text_encoder, "peft_config") and adapter_name in text_encoder.peft_config:
+                print(f"found and unloading adapter {adapter_name}")
                 delete_adapter_layers(text_encoder, adapter_name)
         
     logger.success(f"LoRAs unloaded in {time.time() - t:.2}s")

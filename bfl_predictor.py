@@ -103,7 +103,7 @@ class LoraMixin:
                 or extra_lora_scale != self.extra_lora_scale
             ):
                 if self.lora or self.extra_lora:
-                    unload_loras(model)
+                    unload_loras(model, self.clip.hf_module, self.id)
                 lora_path = self.weights_cache.ensure(lora_weights)
                 paths = [lora_path]
                 scales = [lora_scale]
@@ -112,7 +112,7 @@ class LoraMixin:
                     paths.append(extra_lora_path)
                     scales.append(extra_lora_scale)
 
-                load_loras(model, paths, scales, self.store_clones, self.clip, self.id)
+                load_loras(model, paths, scales, self.store_clones, self.clip.hf_module, self.id)
 
             else:
                 print(f"Lora {lora_weights} already loaded")
@@ -122,14 +122,14 @@ class LoraMixin:
                     scales.append(self.extra_lora_scale)
 
                 # b/c CLIP is shared amongst modules, we need to make sure it's in the right state
-                set_text_encoder_lora_weights(self.clip, self.id, scales)
+                set_text_encoder_lora_weights(self.clip.hf_module, self.id, scales)
 
         else:
             if self.lora:
-                unload_loras(model, self.clip, self.id)
+                unload_loras(model, self.clip.hf_module, self.id)
 
             # b/c CLIP is shared amongst modules, we need to make sure it's in the right state
-            disable_text_encoder_loras(self.clip)
+            disable_text_encoder_loras(self.clip.hf_module)
 
         self.lora = lora_weights
         self.lora_scale = lora_scale

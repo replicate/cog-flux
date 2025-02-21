@@ -15,7 +15,7 @@ build:
     - "huggingface-hub==0.25.0"
     - "safetensors==0.4.3"
     - "sentencepiece==0.2.0"
-    - "transformers==4.43.3"
+    - "transformers==4.49.0"
     - "tokenizers==0.19.1"
     - "protobuf==5.27.2"
     - "diffusers==0.32.2"

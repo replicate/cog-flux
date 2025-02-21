@@ -1,1 +1,6 @@
+build:
+  python_packages:
+    - "accelerate==1.3.0"
+    - "peft==0.14.0"
+
 predict: "predict.py:DevLoraPredictor"
