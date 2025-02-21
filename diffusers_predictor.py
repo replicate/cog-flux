@@ -14,6 +14,7 @@ from diffusers.pipelines import (
     FluxInpaintPipeline,
     FluxImg2ImgPipeline,
 )
+from diffusers.utils.peft_utils import delete_adapter_layers
 
 from weights import WeightsDownloadCache
 
@@ -186,7 +187,14 @@ class DiffusersFlux:
                 self.lora_scale = lora_scale
             print(f"Loaded LoRAs in {time.time() - start_time:.2f}s")
         else:
-            pipe.unload_lora_weights()
+            # loras can only be loaded into the transformer & text encoder
+            # we do this at a lower level instead of calling pipe.unload_loras() so we can handle how we're sharing the text encoder across models.
+            pipe.transformer.unload_lora()
+
+            if hasattr(pipe.text_encoder, "peft_config"):
+                for adapter_name in ["main", "extra"]:
+                    if adapter_name in pipe.text_encoder.peft_config:
+                        delete_adapter_layers(pipe.text_encoder, adapter_name)
             self.loaded_lora_urls = LoadedLoRAs(main=None, extra=None)
             self.lora_scale = 1.0
 

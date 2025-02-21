@@ -2,6 +2,7 @@ from contextlib import contextmanager
 import os
 import time
 from typing import List, Tuple
+import uuid
 
 from einops import rearrange
 
@@ -30,7 +31,7 @@ from flux.util import (
     load_t5,
 )
 from fp8.flux_pipeline import FluxPipeline
-from fp8.lora_loading import load_loras, unload_loras
+from fp8.lora_loading import disable_text_encoder_loras, load_loras, set_text_encoder_lora_weights, unload_loras
 from fp8.util import LoadedModels
 from weights import WeightsDownloadCache
 
@@ -59,6 +60,9 @@ class LoraMixin:
         self.extra_lora_scale = None
         self.weights_cache = weights_cache
         self.store_clones = store_clones
+
+        # ugly internal hack to keep track of text encoder loras
+        self.id = str(uuid.uuid4())
 
     def handle_loras(
         self,
@@ -102,15 +106,25 @@ class LoraMixin:
                     extra_lora_path = self.weights_cache.ensure(extra_lora_weights)
                     paths.append(extra_lora_path)
                     scales.append(extra_lora_scale)
-                load_loras(model, paths, scales, self.store_clones, self.clip)
+
+                load_loras(model, paths, scales, self.store_clones, self.clip, self.id)
 
             else:
                 print(f"Lora {lora_weights} already loaded")
+                scales = [self.lora_scale]
                 if extra_lora_weights:
                     print(f"Extra lora {extra_lora_weights} already loaded")
+                    scales.append(self.extra_lora_scale)
 
-        elif self.lora:
-            unload_loras(model, self.clip)
+                # b/c CLIP is shared amongst modules, we need to reload text encoder scale
+                set_text_encoder_lora_weights(self.clip, self.id, scales)
+
+        else:
+            if self.lora:
+                unload_loras(model, self.clip, self.id)
+
+            # turn off all loras for text encoder; other model may have added them in. 
+            disable_text_encoder_loras(self.clip)
 
         self.lora = lora_weights
         self.lora_scale = lora_scale

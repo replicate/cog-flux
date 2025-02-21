@@ -5,7 +5,8 @@ import torch
 from loguru import logger
 from safetensors.torch import load_file
 from tqdm import tqdm
-from diffusers.loaders.lora_base import _load_lora_into_text_encoder, set_adapters_for_text_encoder, _remove_text_encoder_monkey_patch
+from diffusers.loaders.lora_base import _load_lora_into_text_encoder
+from diffusers.utils.peft_utils import set_weights_and_activate_adapters, set_adapter_layers, delete_adapter_layers
 from transformers import CLIPTextModel
 
 
@@ -533,17 +534,21 @@ def convert_lora_weights(lora_path: str | Path, has_guidance: bool):
 
 
 @torch.inference_mode()
-def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: list[float], store_clones: bool = False, text_encoder: CLIPTextModel | None = None):
+def load_loras(model: Flux, lora_paths: list[str] | list[Path], lora_scales: list[float], store_clones: bool = False, text_encoder: CLIPTextModel | None = None, base_lora_name: str = "default"):
     ind = 0
-    names = []
     for lora, scale in zip(lora_paths, lora_scales):
-        _load_lora(model, lora, scale, store_clones=store_clones, text_encoder=text_encoder, adapter_name=f"lora_{ind}")
-        names.append(f"lora_{ind}")
-        ind += 1
+        _load_lora(model, lora, scale, store_clones=store_clones, text_encoder=text_encoder, adapter_name=f"{base_lora_name}_{ind}")
+        ind += 1    
     
+    set_text_encoder_lora_weights(text_encoder, base_lora_name, lora_scales)
+
+def set_text_encoder_lora_weights(text_encoder: CLIPTextModel, base_lora_name: str, lora_scales: list[float]):
     # for multi lora, scale is improperly set w/_load_lora_into_text_encoder. 
-    if hasattr(model, 'text_encoder_lora') and model.text_encoder_lora and any([val != 1.0 for val in lora_scales]):
-        set_adapters_for_text_encoder(names, text_encoder, lora_scales)
+    adapter_names = [f"{base_lora_name}_{val}" for val in range(len(lora_scales))]
+    if hasattr(text_encoder, 'peft_config'):
+        valid_names_and_scales = [(name, scale) for name, scale in zip(adapter_names, lora_scales) if name in text_encoder.peft_config]
+        if len(valid_names_and_scales) > 0:
+            set_weights_and_activate_adapters(text_encoder, [val[0] for val in valid_names_and_scales], [val[1] for val in valid_names_and_scales])
 
 
 @torch.inference_mode()
@@ -573,7 +578,6 @@ def _load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, stor
 
         # scaling loras via this method actually has a weird multiplicative effect if we load two in a row. 
         _load_lora_into_text_encoder(text_encoder_weights, alphas, text_encoder, lora_scale=1.0, low_cpu_mem_usage=True)
-        model.text_encoder_lora = True
         
     logger.success(f"LoRA applied in {time.time() - t:.2}s")
 
@@ -584,7 +588,7 @@ def _load_lora(model: Flux, lora_path: str | Path, lora_scale: float = 1.0, stor
 
 
 @torch.inference_mode()
-def unload_loras(model: Flux, text_encoder: CLIPTextModel):
+def unload_loras(model: Flux, text_encoder: CLIPTextModel, base_adapter_name: str):
     """
     Unmerges or overwrites lora weights depending on how loras have been stored. 
     """
@@ -600,13 +604,19 @@ def unload_loras(model: Flux, text_encoder: CLIPTextModel):
             # subtract lora from merged weights
             apply_lora_to_model_and_optionally_store_clones(model, lora_weights, -lora_scale, False)
 
-    if hasattr(model, "text_encoder_lora") and model.text_encoder_lora:
-        _remove_text_encoder_monkey_patch(text_encoder)
-        model.text_encoder_lora = False
+    if hasattr(text_encoder, "peft_config"):
+        # TODO: don't love how hardcoded this is. 
+        for adapter_name in [f"{base_adapter_name}_{val}" for val in range(2)]:
+            if adapter_name in text_encoder.peft_config:
+                delete_adapter_layers(text_encoder, adapter_name)
+        
     logger.success(f"LoRAs unloaded in {time.time() - t:.2}s")
 
     model.lora_weights = []
 
+def disable_text_encoder_loras(text_encoder: CLIPTextModel):
+    set_adapter_layers(text_encoder, enabled=False)
+    return
 
 def restore_base_weights(model: Flux):    
     # Get all unique keys that had LoRA weights applied
