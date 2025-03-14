@@ -366,7 +366,7 @@ class BflReduxPredictor(BflBf16Predictor):
     def __init__(
         self,
         flow_model_name: str,
-        loaded_models: LoadedModels | None,
+        loaded_models: LoadedModels | None = None,
         device: str = "cuda",
         offload: bool = False,
         weights_download_cache: WeightsDownloadCache | None = None,
