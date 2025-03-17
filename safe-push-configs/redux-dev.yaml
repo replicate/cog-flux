@@ -1,5 +1,5 @@
 model: replicate/flux-redux-dev-internal-model
-test_model: replicate/test-flux-redux-schnell
+test_model: replicate/test-flux-redux-dev
 test_hardware: cpu
 predict:
   compare_outputs: false
