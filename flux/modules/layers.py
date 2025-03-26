@@ -155,6 +155,12 @@ class DoubleStreamBlock(nn.Module):
             nn.Linear(mlp_hidden_dim, hidden_size, bias=True),
         )
 
+    def get_cache_input(self, img: Tensor, vec: Tensor):
+        img_mod1, _ = self.img_mod(vec)
+        img_modulated = self.img_norm1(img)
+        return (1 + img_mod1.scale) * img_modulated + img_mod1.shift
+
+
     def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor) -> tuple[Tensor, Tensor]:
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
