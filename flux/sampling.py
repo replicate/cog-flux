@@ -177,7 +177,7 @@ def denoise_single_item(
         torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
         torch._dynamo.mark_dynamic(img_cond, 1, min=256, max=8100)
         model = model.to(memory_format=torch.channels_last)
-        model = torch.compile(model)
+    #     model = torch.compile(model)
 
     for t_curr, t_prev in tqdm(zip(timesteps[:-1], timesteps[1:])):
         t_vec = torch.full((1,), t_curr, dtype=img.dtype, device=img.device)
@@ -190,8 +190,10 @@ def denoise_single_item(
             y=vec,
             timesteps=t_vec,
             guidance=guidance_vec,
-            cache_threshold=cache_threshold
+            cache_threshold=cache_threshold,
+            compile_run=compile_run
         )
+        compile_run = False
 
         img = img + (t_prev - t_curr) * pred.squeeze(0)
         if mask is not None:

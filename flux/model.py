@@ -135,8 +135,15 @@ class CacheingFlux(nn.Module):
         timesteps: Tensor,
         y: Tensor,
         guidance: Tensor | None = None,
-        cache_threshold: float = 0.0
+        cache_threshold: float = 0.0,
+        compile = False
     ) -> Tensor:
+        if compile:
+            for block in self.flux.double_blocks:
+                block.compile()
+            for block in self.flux.single_blocks:
+                block.compile()
+                
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
 

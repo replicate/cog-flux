@@ -131,6 +131,8 @@ class BflBf16Predictor(LoraMixin):
         offload: bool = False,
         weights_download_cache: WeightsDownloadCache | None = None,
         restore_lora_from_cloned_weights: bool = False,
+        torch_compile: bool = False,
+        compile_kwargs: dict = {}
     ):
         super().__init__(
             weights_cache=weights_download_cache,
@@ -162,9 +164,16 @@ class BflBf16Predictor(LoraMixin):
 
         self.num_steps = 4 if self.flow_model_name == FLUX_SCHNELL else 28
         self.shift = self.flow_model_name != FLUX_SCHNELL
-        self.compile_run = False
-
         self.vae_scale_factor = 8
+
+        if torch_compile:
+            print("compiling bf16 model")
+            st = time.time()
+            self.compile_run = True
+            self.predict("a cool dog", 1, self.num_steps, **compile_kwargs)
+            print(f"compiled in {time.time() - st}")
+
+        self.compile_run = False
         return
 
     def get_shared_models(self):
