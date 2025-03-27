@@ -361,13 +361,13 @@ class SchnellPredictor(Predictor):
 
 
 class DevPredictor(Predictor):
-    def setup(self) -> None:
+    def setup(self, torch_compile=True) -> None:
         self.base_setup()
         self.bf16_model = BflBf16Predictor(FLUX_DEV, offload=self.should_offload())
         self.fp8_model = BflFp8Flux(
             FLUX_DEV_FP8,
             loaded_models=self.bf16_model.get_shared_models(),
-            torch_compile=True,
+            torch_compile=torch_compile,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
         )
@@ -397,6 +397,7 @@ class DevPredictor(Predictor):
         disable_safety_checker: bool = Inputs.disable_safety_checker,
         go_fast: bool = Inputs.go_fast_with_default(True),
         megapixels: str = Inputs.megapixels,
+        cache_threshold: float = Input(description='cache threshold')
     ) -> List[Path]:
         if image and go_fast:
             print("img2img not supported with fp8 quantization; running with bf16")
@@ -413,6 +414,7 @@ class DevPredictor(Predictor):
             seed=seed,
             width=width,
             height=height,
+            cache_threshold=cache_threshold
         )
 
         return self.postprocess(

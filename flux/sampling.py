@@ -160,7 +160,8 @@ def denoise_single_item(
     compile_run: bool = False,
     image_latents: Optional[Tensor] = None,
     mask: Optional[Tensor] = None,
-    noise: Optional[Tensor] = None
+    noise: Optional[Tensor] = None,
+    cache_threshold: float = 0.0
 ):
     img = img.unsqueeze(0)
     img_ids = img_ids.unsqueeze(0)
@@ -189,6 +190,7 @@ def denoise_single_item(
             y=vec,
             timesteps=t_vec,
             guidance=guidance_vec,
+            cache_threshold=cache_threshold
         )
 
         img = img + (t_prev - t_curr) * pred.squeeze(0)
@@ -218,7 +220,8 @@ def denoise(
     compile_run: bool = False,
     image_latents: Optional[Tensor] = None,
     mask: Optional[Tensor] = None,
-    noise: Optional[Tensor] = None
+    noise: Optional[Tensor] = None,
+    cache_threshold: float = 0.0
 ):
     batch_size = img.shape[0]
     output_imgs = []
@@ -237,7 +240,8 @@ def denoise(
             compile_run=compile_run,
             image_latents=image_latents,
             mask=mask,
-            noise=None if noise is None else noise[i]
+            noise=None if noise is None else noise[i],
+            cache_threshold=cache_threshold
         )
         compile_run = False
         output_imgs.append(denoised_img)

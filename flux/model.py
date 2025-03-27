@@ -121,9 +121,9 @@ class Flux(nn.Module):
 
 class CacheingFlux(nn.Module):
 
-    def __init__(self, params: FluxParams):
+    def __init__(self, flux: Flux):
         super().__init__()
-        self.flux = Flux(params)
+        self.flux = flux
         self.cache = TeaCache()
 
     def forward(
@@ -139,22 +139,24 @@ class CacheingFlux(nn.Module):
     ) -> Tensor:
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
+        orig_img = img.clone()
+        # TODO: you're cacheing and applying the cache to the wrong thing
 
         # running on sequences img
-        img = self.img_in(img)
-        vec = self.time_in(timestep_embedding(timesteps, 256))
-        if self.params.guidance_embed:
+        img = self.flux.img_in(img)
+        vec = self.flux.time_in(timestep_embedding(timesteps, 256))
+        if self.flux.params.guidance_embed:
             if guidance is None:
                 raise ValueError("Didn't get guidance strength for guidance distilled model.")
-            vec = vec + self.guidance_in(timestep_embedding(guidance, 256))
-        vec = vec + self.vector_in(y)
-        txt = self.txt_in(txt)
+            vec = vec + self.flux.guidance_in(timestep_embedding(guidance, 256))
+        vec = vec + self.flux.vector_in(y)
+        txt = self.flux.txt_in(txt)
 
         ids = torch.cat((txt_ids, img_ids), dim=1)
-        pe = self.pe_embedder(ids)
+        pe = self.flux.pe_embedder(ids)
 
         if cache_threshold > 0.0:
-            mod_input = self.double_blocks[0].get_cache_input(img, vec)
+            mod_input = self.flux.double_blocks[0].get_cache_input(img, vec)
             should_use_cache = self.cache.should_use_cache(mod_input, cache_threshold)
         else:
             should_use_cache = False
@@ -162,17 +164,14 @@ class CacheingFlux(nn.Module):
         if should_use_cache:
             img = img + self.cache.cached_residual
         else:
-            orig_img = img.clone()
-
-            for block in self.double_blocks:
+            for block in self.flux.double_blocks:
                 img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
 
             img = torch.cat((txt, img), 1)
-            for block in self.single_blocks:
+            for block in self.flux.single_blocks:
                 img = block(img, vec=vec, pe=pe)
             img = img[:, txt.shape[1] :, ...]
 
-            img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
-
+            img = self.flux.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
             self.cache.update_cache(img - orig_img)
         return img

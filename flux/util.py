@@ -6,7 +6,7 @@ import time
 import torch
 from safetensors.torch import load_file as load_sft
 
-from flux.model import Flux, FluxParams
+from flux.model import Flux, FluxParams, CacheingFlux
 from flux.modules.autoencoder import AutoEncoder, AutoEncoderParams
 from flux.modules.conditioner import HFEmbedder
 from flux.modules.image_embedders import DepthImageEncoder, ReduxImageEncoder
@@ -247,6 +247,9 @@ def load_flow_model(name: str, device: str | torch.device = "cuda", quantize: bo
         sd = load_sft(ckpt_path, device=str(device))
         missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
         print_load_warning(missing, unexpected)
+
+    # TODO: this sucks
+    model = CacheingFlux(model)
     return model
 
 

@@ -253,6 +253,7 @@ class BflBf16Predictor(LoraMixin):
         legacy_mask_path: Path = None,  # inpainting for hotswap
         conditioning_kwargs: dict = {},
         prepare_kwargs: dict = {},
+        cache_threshold: float = 0.0
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         torch_device = torch.device("cuda")
         init_image = None
@@ -326,6 +327,7 @@ class BflBf16Predictor(LoraMixin):
             timesteps=timesteps,
             guidance=guidance,
             compile_run=self.compile_run,
+            cache_threshold=cache_threshold
         )
 
         if self.compile_run:

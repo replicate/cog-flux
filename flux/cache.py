@@ -17,7 +17,7 @@ class TeaCache:
         
         l1_norm_delta = torch.sum((self.prev_step_input - cur_step_input).abs()) / torch.sum(self.prev_step_input.abs())
         self.prev_step_input = cur_step_input
-        self.accumulated_l1_delta += self.rescale_func(l1_norm_delta)
+        self.accumulated_l1_delta += self.rescale_func(l1_norm_delta.float().cpu())
         should_use_cache = l1_norm_delta < cache_threshold 
         if should_use_cache:
             self.accumulated_l1_delta = 0.0
