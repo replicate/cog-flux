@@ -139,11 +139,12 @@ class CacheingFlux(nn.Module):
     ) -> Tensor:
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
-        orig_img = img.clone()
-        # TODO: you're cacheing and applying the cache to the wrong thing
+
 
         # running on sequences img
-        img = self.flux.img_in(img)
+        img = self.flux.img_in(img) # [1, 4096, 3072]
+        orig_img = img.clone() # [1, 4096, 64]
+
         vec = self.flux.time_in(timestep_embedding(timesteps, 256))
         if self.flux.params.guidance_embed:
             if guidance is None:
@@ -162,7 +163,7 @@ class CacheingFlux(nn.Module):
             should_use_cache = False
         
         if should_use_cache:
-            img = img + self.cache.cached_residual
+            img = orig_img + self.cache.cached_residual
         else:
             for block in self.flux.double_blocks:
                 img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
@@ -171,7 +172,7 @@ class CacheingFlux(nn.Module):
             for block in self.flux.single_blocks:
                 img = block(img, vec=vec, pe=pe)
             img = img[:, txt.shape[1] :, ...]
-
-            img = self.flux.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
             self.cache.update_cache(img - orig_img)
+
+        img = self.flux.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
         return img
