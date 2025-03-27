@@ -361,13 +361,13 @@ class SchnellPredictor(Predictor):
 
 
 class DevPredictor(Predictor):
-    def setup(self, torch_compile=True) -> None:
+    def setup(self, compile_bf16=False, compile_fp8=True) -> None:
         self.base_setup()
-        self.bf16_model = BflBf16Predictor(FLUX_DEV, offload=self.should_offload())
+        self.bf16_model = BflBf16Predictor(FLUX_DEV, offload=self.should_offload(), torch_compile=compile_bf16)
         self.fp8_model = BflFp8Flux(
             FLUX_DEV_FP8,
             loaded_models=self.bf16_model.get_shared_models(),
-            torch_compile=torch_compile,
+            torch_compile=compile_fp8,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
         )

@@ -550,6 +550,7 @@ class FluxPipeline:
         num_images: int = 1,
         jpeg_quality: int = 99,
         compiling: bool = False,
+        cache_threshold: float = 0.0
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """
         Generate images based on the given prompt and parameters.
@@ -642,7 +643,8 @@ class FluxPipeline:
                 vec[i],
                 timesteps,
                 guidance,
-                compiling
+                compiling,
+                cache_threshold
             )
             output_imgs.append(denoised_img)
             compiling = False
@@ -667,7 +669,8 @@ class FluxPipeline:
                             vec,
                             timesteps,
                             guidance,
-                            compiling
+                            compiling,
+                            cache_threshold
                             ):
 
         img = img.unsqueeze(0)
@@ -696,8 +699,8 @@ class FluxPipeline:
             if compiling:
                 torch._dynamo.mark_dynamic(img, 1, min=256, max=8100)
                 torch._dynamo.mark_dynamic(img_ids, 1, min=256, max=8100)
-                self.model = torch.compile(self.model)
-                compiling = False
+                #self.model = torch.compile(self.model)
+                #compiling = False
 
             pred = self.model(
                 img=img,
@@ -707,6 +710,8 @@ class FluxPipeline:
                 y=vec,
                 timesteps=t_vec,
                 guidance=guidance_vec,
+                cache_threshold=cache_threshold,
+                compiling=compiling
             )
 
             img = img + (t_prev - t_curr) * pred

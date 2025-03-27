@@ -601,6 +601,7 @@ class BflFp8Flux(LoraMixin):
         seed: int | None = None,
         width: int = 1024,
         height: int = 1024,
+        cache_threshold: float = 0.0,
         **kwargs,  # noqa: ARG002
     ) -> tuple[List[Image.Image], List[np.ndarray]]:
         """Run a single prediction on the model"""
@@ -616,6 +617,7 @@ class BflFp8Flux(LoraMixin):
             init_image=image,
             strength=prompt_strength,
             num_images=num_outputs,
+            cache_threshold=cache_threshold
         )
 
 

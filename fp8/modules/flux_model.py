@@ -18,6 +18,7 @@ from torch import Tensor, nn
 from pydantic import BaseModel
 from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
+from .cache import TeaCache
 
 
 class FluxParams(BaseModel):
@@ -688,3 +689,77 @@ class Flux(nn.Module):
         ckpt = load_file(config.ckpt_path, device="cpu")
         klass.load_state_dict(ckpt, assign=True)
         return klass.to("cpu")
+
+
+class CacheingFlux(nn.Module):
+
+    def __init__(self, flux: Flux):
+        self.flux = Flux
+        self.cache = TeaCache()
+
+    def forward(
+        self,
+        img: Tensor,
+        img_ids: Tensor,
+        txt: Tensor,
+        txt_ids: Tensor,
+        timesteps: Tensor,
+        y: Tensor,
+        guidance: Tensor | None = None,
+        cache_threshold: float = 0.0,
+        compiling: bool = False
+    ) -> Tensor:
+        if compiling:
+            for block in self.flux.double_blocks:
+                block.compile()
+            for block in self.flux.single_blocks:
+                block.compile()
+
+        if img.ndim != 3 or txt.ndim != 3:
+            raise ValueError("Input img and txt tensors must have 3 dimensions.")
+
+        # running on sequences img
+        img = self.flux.img_in(img)
+        orig_img = img.clone()
+        vec = self.flux.time_in(timestep_embedding(timesteps, 256).type(self.dtype))
+
+        if self.flux.params.guidance_embed:
+            if guidance is None:
+                raise ValueError(
+                    "Didn't get guidance strength for guidance distilled model."
+                )
+            vec = vec + self.flux.guidance_in(
+                timestep_embedding(guidance, 256).type(self.dtype)
+            )
+        vec = vec + self.flux.vector_in(y)
+
+        txt = self.flux.txt_in(txt)
+
+        ids = torch.cat((txt_ids, img_ids), dim=1)
+        pe = self.flux.pe_embedder(ids)
+
+        if cache_threshold > 0.0:
+            mod_input = self.flux.double_blocks[0].get_cache_input(img, vec)
+            should_use_cache = self.cache.should_use_cache(mod_input, cache_threshold)
+        else:
+            should_use_cache = False
+
+        if should_use_cache:
+            img = orig_img + self.cache.cached_residual
+        else:
+
+            # double stream blocks
+            for block in self.flux.double_blocks:
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+
+            img = torch.cat((txt, img), 1)
+
+            # single stream blocks
+            for block in self.flux.single_blocks:
+                img = block(img, vec=vec, pe=pe)
+
+            img = img[:, txt.shape[1] :, ...]
+            self.cache.update_cache(img - orig_img)
+
+        img = self.flux.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
+        return img
