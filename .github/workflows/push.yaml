@@ -9,9 +9,31 @@ on:
         default: 'all'
 
 jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+        
+      - id: set-matrix
+        run: |
+          if [ "${{ inputs.models }}" = "all" ]; then
+            echo "matrix={\"model\":[\"schnell\",\"dev\",\"fill-dev\",\"canny-dev\",\"depth-dev\",\"redux-dev\",\"redux-schnell\",\"schnell-lora\",\"dev-lora\",\"hotswap-lora\"]}" >> $GITHUB_OUTPUT
+          else
+            # Convert comma-separated string to JSON array
+            MODELS=$(echo "${{ inputs.models }}" | jq -R -s -c 'split(",")')
+            echo "matrix={\"model\":$MODELS}" >> $GITHUB_OUTPUT
+          fi
+          
   cog-safe-push:
     # runs-on: ubuntu-latest-4-cores
+    needs: prepare-matrix
     runs-on: depot-ubuntu-22.04-4
+    strategy:
+      matrix: ${{fromJson(needs.prepare-matrix.outputs.matrix)}}
+      fail-fast: false  # Continue with other models if one fails
 
     steps:
     - uses: actions/checkout@v3
@@ -33,27 +55,24 @@ jobs:
     - name: Install cog-safe-push
       run: |
         pip install git+https://github.com/replicate/cog-safe-push.git
+    
+    - name: Create .env file
+      if: ${{ matrix.model == 'schnell-lora' || matrix.model == 'dev-lora' || matrix.model == 'hotswap-lora' || matrix.model == 'fill-dev'}}
+      run: |
+        echo "CIVITAI_API_KEY=${{ secrets.CIVITAI_API_KEY }}" > .env
 
     - name: Push selected models
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
       run: |
-        if [ "${{ inputs.models }}" = "all" ]; then
-          models="schnell,dev,fill-dev,canny-dev,depth-dev,redux-dev,redux-schnell,schnell-lora,dev-lora,hotswap-lora"
-        else
-          models="${{ inputs.models }}"
+        echo "==="
+        echo "==="
+        echo "=== Pushing ${{ matrix.model }}"
+        echo "==="
+        echo "==="
+        ./script/select.sh ${{ matrix.model }}
+        cog-safe-push -vv
+        if [ "${{ matrix.model }}" != "hotswap-lora" ]; then
+          cog push r8.im/black-forest-labs/flux-${{ matrix.model }}
         fi
-
-        for model in ${models//,/ }; do
-          echo "==="
-          echo "==="
-          echo "=== Pushing $model"
-          echo "==="
-          echo "==="
-          ./script/select.sh $model
-          cog-safe-push -vv
-          if [ "$model" != "hotswap-lora" ]; then
-            cog push r8.im/black-forest-labs/flux-$model  # to get openapi schema :..(
-          fi
-        done

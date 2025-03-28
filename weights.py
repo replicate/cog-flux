@@ -76,7 +76,9 @@ class WeightsDownloadCache:
 
 
 def download_weights(url: str, path: Path):
+    import pdb
     download_url = make_download_url(url)
+    pdb.set_trace()
     download_weights_url(download_url, path)
 
 
@@ -154,7 +156,7 @@ def download_data_url(url: str, path: Path):
 def download_safetensors(url: str, path: Path):
     try:
         # don't want to leak civitai api key
-        output_redirect = subprocess.PIPE if "token=" in url else None
+        output_redirect = subprocess.PIPE 
         result = subprocess.run(
             ["pget", url, str(path)],
             check=False,
