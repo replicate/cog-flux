@@ -15,6 +15,10 @@ import requests
 
 DEFAULT_CACHE_BASE_DIR = Path("/src/weights-cache")
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class WeightsDownloadCache:
     def __init__(
@@ -149,7 +153,38 @@ def download_data_url(url: str, path: Path):
 
 def download_safetensors(url: str, path: Path):
     try:
-        subprocess.run(["pget", url, str(path)], check=True)
+        # don't want to leak civitai api key
+        output_redirect = subprocess.PIPE
+        if "token=" in url:
+            # print url without token
+            print(f"downloading weights from {url.split('token=')[0]}token=***")
+        else:
+            print(f"downloading weights from {url}")
+
+        result = subprocess.run(
+            ["pget", url, str(path)],
+            check=False,
+            stdout=output_redirect,
+            stderr=output_redirect,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            error_output = result.stderr or ""
+            if "401" in error_output:
+                raise RuntimeError(
+                    "Authorization to download weights failed. Please check to see if an API key is needed and if so pass in with the URL."
+                )
+            if "404" in error_output:
+                if "civitai" in url:
+                    raise RuntimeError(
+                        "Model not found on CivitAI at that URL. Double check the CivitAI model ID; the id on the download link can be different than the id to browse to the model page."
+                    )
+                raise RuntimeError(
+                    "Weights not found at the supplied URL. Please check the URL."
+                )
+            raise RuntimeError(f"Failed to download safetensors file: {error_output}")
+
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Failed to download safetensors file: {e}")
 
@@ -225,4 +260,7 @@ def make_huggingface_download_url(owner: str, model_name: str) -> str:
 
 
 def make_civitai_download_url(model_id: str) -> str:
-    return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor"
+    civit_api_key = os.getenv("CIVITAI_API_KEY")
+    if civit_api_key is None:
+        return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor"
+    return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token={civit_api_key}"
