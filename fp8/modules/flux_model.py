@@ -361,6 +361,11 @@ class DoubleStreamBlock(nn.Module):
         q, k, v = x.reshape(B, L, self.K, self.H, D // self.KH).permute(2, 0, 3, 1, 4)
         return q, k, v
 
+    def get_cache_input(self, img: Tensor, vec: Tensor):
+        img_mod1, _ = self.img_mod(vec)
+        img_modulated = self.img_norm1(img)
+        return (1 + img_mod1.scale) * img_modulated + img_mod1.shift
+
     def forward(
         self,
         img: Tensor,
@@ -694,7 +699,8 @@ class Flux(nn.Module):
 class CacheingFlux(nn.Module):
 
     def __init__(self, flux: Flux):
-        self.flux = Flux
+        super().__init__()
+        self.flux = flux
         self.cache = TeaCache()
 
     def forward(
@@ -721,7 +727,7 @@ class CacheingFlux(nn.Module):
         # running on sequences img
         img = self.flux.img_in(img)
         orig_img = img.clone()
-        vec = self.flux.time_in(timestep_embedding(timesteps, 256).type(self.dtype))
+        vec = self.flux.time_in(timestep_embedding(timesteps, 256).type(self.flux.dtype))
 
         if self.flux.params.guidance_embed:
             if guidance is None:
@@ -729,7 +735,7 @@ class CacheingFlux(nn.Module):
                     "Didn't get guidance strength for guidance distilled model."
                 )
             vec = vec + self.flux.guidance_in(
-                timestep_embedding(guidance, 256).type(self.dtype)
+                timestep_embedding(guidance, 256).type(self.flux.dtype)
             )
         vec = vec + self.flux.vector_in(y)
 

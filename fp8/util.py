@@ -9,7 +9,7 @@ from typing import Any, Literal, Optional
 import torch
 from fp8.modules.autoencoder import AutoEncoder, AutoEncoderParams
 from fp8.modules.conditioner import HFEmbedder
-from fp8.modules.flux_model import Flux, FluxParams
+from fp8.modules.flux_model import Flux, FluxParams, CacheingFlux
 from safetensors.torch import load_file as load_sft
 
 try:
@@ -78,7 +78,7 @@ class ModelSpec(BaseModel):
     # Improved precision via not quanitzing the flow embedder layers
     quantize_flow_embedder_layers: bool = False
 
-def load_models(config: ModelSpec) -> tuple[Flux, AutoEncoder, HFEmbedder, HFEmbedder]:
+def load_models(config: ModelSpec) -> tuple[CacheingFlux, AutoEncoder, HFEmbedder, HFEmbedder]:
     flow = load_flow_model(config)
     ae = load_autoencoder(config)
     clip, t5 = load_text_encoders(config)
@@ -246,7 +246,7 @@ def download_weights(url: str, dest: Path):
     print("downloading took: ", time.time() - start)
 
 
-def load_flow_model(config: ModelSpec) -> Flux:
+def load_flow_model(config: ModelSpec) -> CacheingFlux:
     ckpt_path = config.ckpt_path
     if not os.path.exists(ckpt_path):
         flux_url = config.flux_url
@@ -266,7 +266,8 @@ def load_flow_model(config: ModelSpec) -> Flux:
         print_load_warning(missing, unexpected)
         if not config.prequantized_flow:
             model.type(into_dtype(config.flow_dtype))
-    return model
+    cmodel = CacheingFlux(model)
+    return cmodel
 
 
 def load_text_encoders(config: ModelSpec) -> tuple[HFEmbedder, HFEmbedder]:
@@ -308,7 +309,7 @@ def load_autoencoder(config: ModelSpec) -> AutoEncoder:
 
 @dataclass
 class LoadedModels():
-    flow: Optional[Flux]
+    flow: Optional[CacheingFlux]
     ae: Any
     clip: Any 
     t5: Any 
