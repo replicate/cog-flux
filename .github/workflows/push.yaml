@@ -55,11 +55,6 @@ jobs:
     - name: Install cog-safe-push
       run: |
         pip install git+https://github.com/replicate/cog-safe-push.git
-    
-    - name: Create .env file
-      if: ${{ matrix.model == 'schnell-lora' || matrix.model == 'dev-lora' || matrix.model == 'hotswap-lora' || matrix.model == 'fill-dev'}}
-      run: |
-        echo "CIVITAI_API_KEY=${{ secrets.CIVITAI_API_KEY }}" > .env
 
     - name: Push selected models
       env:

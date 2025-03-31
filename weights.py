@@ -76,9 +76,7 @@ class WeightsDownloadCache:
 
 
 def download_weights(url: str, path: Path):
-    import pdb
     download_url = make_download_url(url)
-    pdb.set_trace()
     download_weights_url(download_url, path)
 
 
@@ -156,23 +154,35 @@ def download_data_url(url: str, path: Path):
 def download_safetensors(url: str, path: Path):
     try:
         # don't want to leak civitai api key
-        output_redirect = subprocess.PIPE 
+        output_redirect = subprocess.PIPE
+        if "token=" in url:
+            # print url without token
+            print(f"downloading weights from {url.split("token=")[0]}token=***")
+        else:
+            print(f"downloading weights from {url}")
+
         result = subprocess.run(
             ["pget", url, str(path)],
             check=False,
             stdout=output_redirect,
             stderr=output_redirect,
-            text=True
+            text=True,
         )
 
         if result.returncode != 0:
             error_output = result.stderr or ""
             if "401" in error_output:
-                raise RuntimeError("Authorization to download weights failed. Please check to see if an API key is needed and if so pass in with the URL.")
+                raise RuntimeError(
+                    "Authorization to download weights failed. Please check to see if an API key is needed and if so pass in with the URL."
+                )
             if "404" in error_output:
                 if "civitai" in url:
-                    raise RuntimeError("Model not found on CivitAI at that URL. Double check the CivitAI model ID; the id on the download link can be different than the id to browse to the model page.")
-                raise RuntimeError("Weights not found at the supplied URL. Please check the URL.")
+                    raise RuntimeError(
+                        "Model not found on CivitAI at that URL. Double check the CivitAI model ID; the id on the download link can be different than the id to browse to the model page."
+                    )
+                raise RuntimeError(
+                    "Weights not found at the supplied URL. Please check the URL."
+                )
             raise RuntimeError(f"Failed to download safetensors file: {error_output}")
 
     except subprocess.CalledProcessError as e:
@@ -253,5 +263,4 @@ def make_civitai_download_url(model_id: str) -> str:
     civit_api_key = os.getenv("CIVITAI_API_KEY")
     if civit_api_key is None:
         return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor"
-    print(f"downloading from CivitAI at https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token=****")
     return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token={civit_api_key}"
