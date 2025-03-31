@@ -157,7 +157,7 @@ def download_safetensors(url: str, path: Path):
         output_redirect = subprocess.PIPE
         if "token=" in url:
             # print url without token
-            print(f"downloading weights from {url.split("token=")[0]}token=***")
+            print(f"downloading weights from {url.split('token=')[0]}token=***")
         else:
             print(f"downloading weights from {url}")
 
