@@ -971,6 +971,152 @@ class DepthDevPredictor(Predictor):
         )
 
 
+class BigDevPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup()
+        cache = WeightsDownloadCache()
+        self.bf16_base_model = BflBf16Predictor(
+            FLUX_DEV, 
+            offload=self.should_offload(),
+            weights_download_cache=cache,
+            restore_lora_from_cloned_weights=True,
+        )
+        self.fp8_base_model = BflFp8Flux(
+            FLUX_DEV_FP8,
+            loaded_models=self.bf16_base_model.get_shared_models(),
+            torch_compile=True,
+            compilation_aspect_ratios=ASPECT_RATIOS,
+            offload=self.should_offload(),
+            weights_download_cache=cache,
+            restore_lora_from_cloned_weights=True,
+        )
+        
+        self.redux_model = BflReduxPredictor(
+            FLUX_DEV,
+            loaded_models=self.bf16_base_model.get_shared_models(),
+            offload=self.should_offload(),
+        )
+
+    def predict(
+        self,
+        prompt: str = Inputs.prompt,
+        redux_image: Path = Input(
+            description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models",
+        ),
+        aspect_ratio: str = Input(
+            description="Aspect ratio for the generated image. If custom is selected, uses height and width below & will run in bf16 mode",
+            choices=list(ASPECT_RATIOS.keys()) + ["custom"],
+            default="1:1",
+        ),
+        height: int = Input(
+            description="Height of generated image. Only works if `aspect_ratio` is set to custom. Will be rounded to nearest multiple of 16. Incompatible with fast generation",
+            ge=256,
+            le=1440,
+            default=None,
+        ),
+        width: int = Input(
+            description="Width of generated image. Only works if `aspect_ratio` is set to custom. Will be rounded to nearest multiple of 16. Incompatible with fast generation",
+            ge=256,
+            le=1440,
+            default=None,
+        ),
+        image: Path = Input(
+            description="Input image for image to image mode. The aspect ratio of your output will match this image",
+            default=None,
+        ),
+        mask: Path = Input(
+            description="Image mask for image inpainting mode. If provided, aspect_ratio, width, and height inputs are ignored.",
+            default=None,
+        ),
+        prompt_strength: float = Input(
+            description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            ge=0.0,
+            le=1.0,
+            default=0.80,
+        ),
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=28, recommended=(28, 50)
+        ),
+        guidance: float = Inputs.guidance_with(default=3, le=10),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        go_fast: bool = Inputs.go_fast_with_default(True),
+        lora_weights: str = Inputs.lora_weights,
+        lora_scale: float = Inputs.lora_scale,
+        extra_lora: str = Input(
+            description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
+            default=None,
+        ),
+        extra_lora_scale: float = Input(
+            description="Determines how strongly the extra LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
+            default=1.0,
+            le=3.0,
+            ge=-1,
+        ),
+        megapixels: str = Inputs.megapixels,
+    ) -> List[Path]:
+    
+        if redux_image:
+            self.bf16_base_model.handle_loras(lora_weights, lora_scale, extra_lora, extra_lora_scale)
+
+            prompt = ""
+            width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
+            imgs, np_imgs = self.redux_model.predict(
+                prompt,
+                num_outputs,
+                num_inference_steps=num_inference_steps,
+                guidance=guidance,
+                seed=seed,
+                width=width,
+                height=height,
+                prepare_kwargs={"redux_img_path": redux_image},
+            )
+        else:
+            if aspect_ratio == "custom":
+                if go_fast:
+                    print(
+                        "Custom aspect ratios not supported with fast fp8 inference; will run in bf16"
+                    )
+                    go_fast = False
+                width = make_multiple_of_16(width)
+                height = make_multiple_of_16(height)
+            if image and go_fast:
+                print(
+                    "Img2img and inpainting not supported with fast fp8 inference; will run in bf16"
+                )
+                go_fast = False
+
+            model = self.fp8_base_model if go_fast else self.bf16_base_model
+            model.handle_loras(lora_weights, lora_scale, extra_lora, extra_lora_scale)
+            
+
+            imgs, np_imgs = model.predict(
+                prompt,
+                num_outputs,
+                num_inference_steps,
+                guidance=guidance_scale,
+                legacy_image_path=image,
+                legacy_mask_path=mask,
+                prompt_strength=prompt_strength,
+                seed=seed,
+                width=width,
+                height=height,
+            )
+
+
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
+
 def make_multiple_of_16(n):
     # Rounds up to the next multiple of 16, or returns n if already a multiple of 16
     return ((n + 15) // 16) * 16
