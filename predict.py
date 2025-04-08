@@ -972,7 +972,7 @@ class DepthDevPredictor(Predictor):
 
 
 class BigDevPredictor(Predictor):
-    def setup(self) -> None:
+    def setup(self, compile_fp8=True) -> None:
         self.base_setup()
         cache = WeightsDownloadCache()
         self.bf16_base_model = BflBf16Predictor(
@@ -989,6 +989,7 @@ class BigDevPredictor(Predictor):
             offload=self.should_offload(),
             weights_download_cache=cache,
             restore_lora_from_cloned_weights=True,
+            torch_compile=compile_fp8,
         )
         
         self.redux_model = BflReduxPredictor(
