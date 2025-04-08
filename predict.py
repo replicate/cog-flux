@@ -984,12 +984,11 @@ class BigDevPredictor(Predictor):
         self.fp8_base_model = BflFp8Flux(
             FLUX_DEV_FP8,
             loaded_models=self.bf16_base_model.get_shared_models(),
-            torch_compile=True,
+            torch_compile=compile_fp8,
             compilation_aspect_ratios=ASPECT_RATIOS,
             offload=self.should_offload(),
             weights_download_cache=cache,
             restore_lora_from_cloned_weights=True,
-            torch_compile=compile_fp8,
         )
         
         self.redux_model = BflReduxPredictor(
@@ -1002,7 +1001,7 @@ class BigDevPredictor(Predictor):
         self,
         prompt: str = Inputs.prompt,
         redux_image: Path = Input(
-            description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models",
+            description="Input image to condition your output on. This replaces prompt for FLUX.1 Redux models", default=None
         ),
         aspect_ratio: str = Input(
             description="Aspect ratio for the generated image. If custom is selected, uses height and width below & will run in bf16 mode",
@@ -1084,6 +1083,8 @@ class BigDevPredictor(Predictor):
                     go_fast = False
                 width = make_multiple_of_16(width)
                 height = make_multiple_of_16(height)
+            else:
+                width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
             if image and go_fast:
                 print(
                     "Img2img and inpainting not supported with fast fp8 inference; will run in bf16"
@@ -1098,7 +1099,7 @@ class BigDevPredictor(Predictor):
                 prompt,
                 num_outputs,
                 num_inference_steps,
-                guidance=guidance_scale,
+                guidance=guidance,
                 legacy_image_path=image,
                 legacy_mask_path=mask,
                 prompt_strength=prompt_strength,

@@ -1,0 +1,105 @@
+model: replicate/flux-dev-lora-internal-model
+test_model: replicate/test-flux-dev-lora
+predict:
+  compare_outputs: false  # TODO(andreas): why doesn't this work?
+  predict_timeout: 600
+  test_cases:
+
+    # monalisa ~= a person
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 28
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        lora_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+      #match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/dev_flux-mona-lisa_go_fast.jpg
+
+    # monalisa ~= 4 persons
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 4
+        num_inference_steps: 28
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        lora_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+      match_prompt: Four images of a woman at a rave with pink hair who looks like the Mona Lisa
+
+
+    # same but slower
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 28
+        seed: 8888
+        output_format: jpg
+        go_fast: false
+        lora_weights: fofr/flux-mona-lisa
+        lora_scale: 0.9
+     # match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/dev_flux-mona-lisa_go_slow.jpg
+
+    # no lora!
+    - inputs:
+        prompt: a photo of MNALSA woman with pink hair at a rave
+        num_outputs: 1
+        num_inference_steps: 28
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        lora_scale: 0.9
+    #  match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/dev_no-lora_go_fast.jpg
+
+    # aesthetic lora
+    - inputs:
+        prompt: a smart person, sftsrv style
+        lora_weights: aramintak/flux-softserve-anime
+        num_outputs: 1
+        num_inference_steps: 28
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        lora_scale: 0.9
+     # match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/dev_flux-softserve-anime_go_fast.jpg
+
+    # non-replicate weights
+    - inputs:
+        prompt: a coca cola can "sacred elixir" arcana in the style of TOK a trtcrd, tarot style
+        num_outputs: 1
+        num_inference_steps: 28
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        lora_weights: huggingface.co/multimodalart/flux-tarot-v1
+        lora_scale: 0.9
+    #  match_url: https://storage.googleapis.com/replicate-models-public-test/flux-lora-imgs/dev_flux-tarot-v1_go_fast.jpg
+
+    # non-replicate weights kohya
+    - inputs:
+        prompt: cy04, a book titled "Did I Leave The Oven On?", an illustration of a man sitting at work, looking worried, thought bubble above his head with an oven in it
+        num_outputs: 1
+        num_inference_steps: 28
+        output_format: jpg
+        go_fast: true
+        lora_weights: huggingface.co/Purz/choose-your-own-adventure
+        lora_scale: 0.9
+      match_prompt: A drawing of a man thinking about an oven
+
+    # non-replicate weights no mlp trained
+    - inputs:
+        prompt: photo of a boy ANIMESTYLE
+        num_outputs: 1
+        num_inference_steps: 28
+        output_format: jpg
+        go_fast: true
+        lora_weights: https://storage.googleapis.com/replicate-models-public-test/flux-loras/fixed_lora.safetensors
+        lora_scale: 0.9
+      match_prompt: An anime drawing of a boy
+
+  fuzz:
+    fixed_inputs:
+      lora_weights: fofr/flux-90s-power-rangers
+    iterations: 10
