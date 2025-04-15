@@ -1005,8 +1005,7 @@ class StreamingDevPredictor(Predictor):
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         model = self.bf16_model
 
-        for imgs, np_imgs in model.predict(
-            prompt,
+        inp = model.prep_inputs(prompt,
             num_outputs,
             num_inference_steps,
             guidance=guidance,
@@ -1015,8 +1014,9 @@ class StreamingDevPredictor(Predictor):
             seed=seed,
             width=width,
             height=height,
-        ):
-            
+        )
+
+        for imgs, np_imgs in model.streaming_predict(inp):
             out = self.postprocess(
                 imgs,
                 disable_safety_checker,

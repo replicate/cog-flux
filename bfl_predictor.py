@@ -446,6 +446,7 @@ class StreamingBflBf16Predictor(BflBf16Predictor):
         self.streaming_width = width
         return inp
     
+    @torch.inference_mode()
     def streaming_predict(self, inp: dict):
         torch_device = torch.device("cuda")
 
@@ -454,7 +455,10 @@ class StreamingBflBf16Predictor(BflBf16Predictor):
 
         for ts_indexer in range(int(np.ceil(len(timesteps) / num_streaming_steps))):
             start = ts_indexer * num_streaming_steps
-            end = min(ts_indexer + num_streaming_steps, len(timesteps))
+            # need to have the last timestep of batch n be the first timestep of batch n+1 b/c of how sampling is implemented
+            end = min(start + num_streaming_steps + 1, len(timesteps))  
+            print(f"timestamps from {start} to {end}")
+            print(timesteps[start:end])
             cur_ts_batch = timesteps[start:end]
             inp['timesteps'] = cur_ts_batch
 
