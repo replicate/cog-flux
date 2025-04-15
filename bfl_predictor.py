@@ -354,6 +354,138 @@ class BflBf16Predictor(LoraMixin):
         ]
         images = [Image.fromarray(img) for img in np_images]
         return images, np_images
+    
+class StreamingBflBf16Predictor(BflBf16Predictor):
+
+    @torch.inference_mode()
+    def prep_inputs(
+        self,
+        prompt: str,
+        num_outputs: int,
+        num_inference_steps: int,
+        guidance: float = 3.5,  # schnell ignores guidance within the model, fine to have default
+        prompt_strength: float = 0.8,
+        seed: int | None = None,
+        width: int = 1024,
+        height: int = 1024,
+        legacy_image_path: Path | None = None,  # img2img for flux-dev
+        legacy_mask_path: Path = None,  # inpainting for hotswap
+        conditioning_kwargs: dict = {},
+        prepare_kwargs: dict = {},
+    ) -> dict:
+        torch_device = torch.device("cuda")
+        init_image = None
+        img_cond = None
+
+        if not seed:
+            seed = int.from_bytes(os.urandom(2), "big")
+        print(f"Using seed: {seed}")
+
+        if conditioning_kwargs:
+            img_cond = self.prepare_conditioning(
+                height=height, width=width, **conditioning_kwargs
+            )
+
+        # used for flux-dev & hotswap img2img
+        if legacy_image_path is not None and img_cond is None:
+            # For backwards compatibility, we still preserve width and
+            # height for init_images, as opposed to using megapixels
+            # with a "match_input" value.
+            init_image, width, height = self.prepare_init_image(legacy_image_path)
+
+        x = get_noise(
+            num_outputs,
+            height,
+            width,
+            device=torch_device,
+            dtype=torch.bfloat16,
+            seed=seed,
+        )
+        timesteps = get_schedule(
+            num_inference_steps,
+            (x.shape[-1] * x.shape[-2]) // 4,  # equivalent to inp["img"].shape[1] below
+            shift=self.shift,
+        )
+
+        # used for flux-dev & hotswap img2img
+        if init_image is not None:
+            t_idx = int((1.0 - prompt_strength) * num_inference_steps)
+            t = timesteps[t_idx]
+            timesteps = timesteps[t_idx:]
+            x = t * x + (1.0 - t) * init_image.to(x.dtype)
+
+        if self.offload:
+            self.t5, self.clip = self.t5.to(torch_device), self.clip.to(torch_device)
+
+        inp = self.prepare(x, [prompt] * num_outputs, **prepare_kwargs)
+
+        # fill/controlnets
+        if img_cond is not None:
+            inp["img_cond"] = img_cond
+
+        # hotswap inpainting
+        if legacy_mask_path:
+            assert init_image is not None, "Init image is not set when mask is set"
+            inp["mask"], inp["noise"], inp["image_latents"] = self.prepare_legacy_mask(
+                mask_path=legacy_mask_path,
+                init_image=init_image,
+                noise=x,
+                width=width,
+                height=height,
+            )
+
+        if self.offload:
+            self.t5, self.clip = self.t5.cpu(), self.clip.cpu()
+            torch.cuda.empty_cache()
+            self.model = self.model.to(torch_device)
+
+        inp['timesteps'] = timesteps
+        inp['guidance'] = guidance
+        inp['compile_run'] = self.compile_run
+        self.streaming_height = height
+        self.streaming_width = width
+        return inp
+    
+    def streaming_predict(self, inp: dict):
+        torch_device = torch.device("cuda")
+
+        timesteps = inp['timesteps']
+        num_streaming_steps = 4
+
+        for ts_indexer in range(int(np.ceil(len(timesteps) / num_streaming_steps))):
+            start = ts_indexer * num_streaming_steps
+            end = min(ts_indexer + num_streaming_steps, len(timesteps))
+            cur_ts_batch = timesteps[start:end]
+            inp['timesteps'] = cur_ts_batch
+
+            x, _ = denoise(
+                self.model,
+                **inp,
+            )
+            inp['img'] = x
+
+            if self.offload:
+                self.model.cpu()
+                torch.cuda.empty_cache()
+                self.ae.decoder.to(x.device)
+
+            x = unpack(x.float(), self.streaming_height, self.streaming_width)
+            with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
+                x = self.ae.decode(x)
+
+            if self.offload:
+                self.ae.decoder.cpu()
+                torch.cuda.empty_cache()
+
+            np_images = [
+                (127.5 * (rearrange(x[i], "c h w -> h w c").clamp(-1, 1) + 1.0))
+                .cpu()
+                .byte()
+                .numpy()
+                for i in range(x.shape[0])
+            ]
+            images = [Image.fromarray(img) for img in np_images]
+            yield images, np_images
 
 
 class BflReduxPredictor(BflBf16Predictor):

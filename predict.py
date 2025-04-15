@@ -10,6 +10,7 @@ from bfl_predictor import (
     BflFillFlux,
     BflFp8Flux,
     BflReduxPredictor,
+    StreamingBflBf16Predictor,
 )
 from diffusers_predictor import DiffusersFlux
 from flux.modules.conditioner import PreLoadedHFEmbedder
@@ -969,6 +970,61 @@ class DepthDevPredictor(Predictor):
             output_quality,
             np_images=np_imgs,
         )
+    
+
+class StreamingDevPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup()
+        self.bf16_model = StreamingBflBf16Predictor(FLUX_DEV, offload=self.should_offload())
+
+    def predict(
+        self,
+        prompt: str = Inputs.prompt,
+        aspect_ratio: str = Inputs.aspect_ratio,
+        image: Path = Input(
+            description="Input image for image to image mode. The aspect ratio of your output will match this image",
+            default=None,
+        ),
+        prompt_strength: float = Input(
+            description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            ge=0.0,
+            le=1.0,
+            default=0.80,
+        ),
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=28, recommended=(28, 50)
+        ),
+        guidance: float = Inputs.guidance_with(default=3, le=10),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        megapixels: str = Inputs.megapixels,
+    ) -> List[Path]:
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
+        model = self.bf16_model
+
+        for imgs, np_imgs in model.predict(
+            prompt,
+            num_outputs,
+            num_inference_steps,
+            guidance=guidance,
+            legacy_image_path=image,
+            prompt_strength=prompt_strength,
+            seed=seed,
+            width=width,
+            height=height,
+        ):
+            
+            out = self.postprocess(
+                imgs,
+                disable_safety_checker,
+                output_format,
+                output_quality,
+                np_images=np_imgs,
+            )
+            yield out
 
 
 def make_multiple_of_16(n):
