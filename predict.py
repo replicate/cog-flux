@@ -132,7 +132,7 @@ class Inputs:
     @staticmethod
     def go_fast_with_default(default: bool) -> Input:
         return Input(
-            description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16",
+            description="Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16. Note that outputs will not be deterministic when this is enabled, even if you set a seed.",
             default=default,
         )
 
