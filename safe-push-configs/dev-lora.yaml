@@ -115,4 +115,5 @@ predict:
   fuzz:
     fixed_inputs:
       lora_weights: fofr/flux-90s-power-rangers
+      extra_lora: fofr/flux-80s-cyberpunk
     iterations: 10
