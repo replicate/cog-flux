@@ -99,6 +99,19 @@ predict:
         lora_scale: 0.9
       match_prompt: An anime drawing of a boy
 
+    - inputs:
+        prompt: A portrait photo of MNALSA woman sitting at a party table with a selection of bad 70s food
+        num_outputs: 1
+        num_inference_steps: 28
+        seed: 8888
+        output_format: jpg
+        go_fast: true
+        lora_weights: fofr/flux-bad-70s-food
+        lora_scale: 0.85
+        extra_lora: fofr/flux-mona-lisa
+        extra_lora_scale: 0.9
+      match_prompt: An image of a woman at a dinner table who looks like the Mona Lisa
+
   fuzz:
     fixed_inputs:
       lora_weights: fofr/flux-90s-power-rangers

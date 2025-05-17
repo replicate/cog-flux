@@ -529,6 +529,16 @@ class DevLoraPredictor(Predictor):
         go_fast: bool = Inputs.go_fast_with_default(True),
         lora_weights: str = Inputs.lora_weights,
         lora_scale: float = Inputs.lora_scale,
+        extra_lora: str = Input(
+            description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'",
+            default=None,
+        ),
+        extra_lora_scale: float = Input(
+            description="Determines how strongly the extra LoRA should be applied. Sane results between 0 and 1 for base inference. For go_fast we apply a 1.5x multiplier to this value; we've generally seen good performance when scaling the base value by that amount. You may still need to experiment to find the best value for your particular lora.",
+            default=1.0,
+            le=3.0,
+            ge=-1,
+        ),
         megapixels: str = Inputs.megapixels,
     ) -> List[Path]:
         if image and go_fast:
@@ -536,7 +546,7 @@ class DevLoraPredictor(Predictor):
             go_fast = False
 
         model = self.fp8_model if go_fast else self.bf16_model
-        model.handle_loras(lora_weights, lora_scale)
+        model.handle_loras(lora_weights, lora_scale, extra_lora, extra_lora_scale)
 
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         imgs, np_imgs = model.predict(
