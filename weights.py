@@ -33,7 +33,7 @@ class WeightsDownloadCache:
         self.lru_paths = deque()
         base_dir.mkdir(parents=True, exist_ok=True)
 
-    def ensure(self, url: str) -> Path:
+    def ensure(self, url: str, hf_api_token: str | None = None, civitai_api_token: str | None = None) -> Path:
         path = self._weights_path(url)
 
         if path in self.lru_paths:
@@ -48,7 +48,7 @@ class WeightsDownloadCache:
             while not self._has_enough_space() and len(self.lru_paths) > 0:
                 self._remove_least_recent()
 
-            download_weights(url, path)
+            download_weights(url, path, hf_api_token=hf_api_token, civitai_api_token=civitai_api_token)
 
         self.lru_paths.append(path)  # Add file to end of cache
         return path
@@ -75,8 +75,9 @@ class WeightsDownloadCache:
         return self.base_dir / short_hash
 
 
-def download_weights(url: str, path: Path):
-    download_url = make_download_url(url)
+def download_weights(url: str, path: Path, hf_api_token: str | None = None, civitai_api_token: str | None = None):
+    # TODO: if hf_api_token, then use hf downloader and skip all the url/pget stuff
+    download_url = make_download_url(url, hf_api_token=hf_api_token, civitai_api_token=civitai_api_token)
     download_weights_url(download_url, path)
 
 
@@ -189,7 +190,7 @@ def download_safetensors(url: str, path: Path):
         raise RuntimeError(f"Failed to download safetensors file: {e}")
 
 
-def make_download_url(url: str) -> str:
+def make_download_url(url: str, hf_api_token: str | None = None, civitai_api_token: str | None = None) -> str:
     if url.startswith("data:"):
         return url
     if m := re.match(r"^(?:https?://)?huggingface\.co/([^/]+)/([^/]+)/?$", url):
@@ -197,11 +198,11 @@ def make_download_url(url: str) -> str:
         return make_huggingface_download_url(owner, model_name)
     if m := re.match(r"^(?:https?://)?civitai\.com/models/(\d+)(?:/[^/?]+)?/?$", url):
         model_id = m.groups()[0]
-        return make_civitai_download_url(model_id)
+        return make_civitai_download_url(model_id, civitai_api_token)
     if m := re.match(r"^((?:https?://)?civitai\.com/api/download/models/.*)$", url):
         return url
     if m := re.match(r"^(https?://.*\.safetensors)(?:\?|$)", url):
-        return m.groups()[0]
+        return url # might be signed, keep the whole url
     if m := re.match(r"^(?:https?://replicate.com/)?([^/]+)/([^/]+)/?$", url):
         owner, model_name = m.groups()
         return make_replicate_model_download_url(owner, model_name)
@@ -259,8 +260,7 @@ def make_huggingface_download_url(owner: str, model_name: str) -> str:
     )
 
 
-def make_civitai_download_url(model_id: str) -> str:
-    civit_api_key = os.getenv("CIVITAI_API_KEY")
-    if civit_api_key is None:
+def make_civitai_download_url(model_id: str, civitai_api_token: str | None = None) -> str:
+    if civitai_api_token is None:
         return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor"
-    return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token={civit_api_key}"
+    return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token={civitai_api_token}"
