@@ -263,4 +263,4 @@ def make_huggingface_download_url(owner: str, model_name: str) -> str:
 def make_civitai_download_url(model_id: str, civitai_api_token: str | None = None) -> str:
     if civitai_api_token is None:
         return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor"
-    return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token={civitai_api_token}"
+    return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token={civitai_api_token.get_secret_value()}"
