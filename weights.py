@@ -12,6 +12,8 @@ from io import BytesIO
 from pathlib import Path
 
 import requests
+import huggingface_hub
+from huggingface_hub import hf_hub_download, login
 
 DEFAULT_CACHE_BASE_DIR = Path("/src/weights-cache")
 
@@ -76,7 +78,12 @@ class WeightsDownloadCache:
 
 
 def download_weights(url: str, path: Path, hf_api_token: str | None = None, civitai_api_token: str | None = None):
-    # TODO: if hf_api_token, then use hf downloader and skip all the url/pget stuff
+    # If we have a HuggingFace API token, use it to login
+    if hf_api_token is not None and "huggingface.co" in url:
+        print("Attemptig to login to HuggingFace using provided token...")
+        login(token=hf_api_token.get_secret_value())
+        print("Login to HuggingFace successful!")
+        
     download_url = make_download_url(url, hf_api_token=hf_api_token, civitai_api_token=civitai_api_token)
     download_weights_url(download_url, path)
 
@@ -87,11 +94,15 @@ def download_weights_url(url: str, path: Path):
     print("Downloading weights")
     start_time = time.time()
 
-    if url.startswith("data:"):
+    if url.startswith("file://"):
+        # Move the already downloaded file to the desired path
+        safetensors_path = Path(url.split("file://")[1])
+        shutil.copy(safetensors_path, path)
+    elif url.startswith("data:"):
         download_data_url(url, path)
     elif url.endswith(".tar"):
         download_safetensors_tarball(url, path)
-    elif url.endswith(".safetensors") or "://civitai.com/api/download" in url:
+    elif url.endswith(".safetensors") or "://civitai.com/api/download" in url or ".safetensors?" in url:
         download_safetensors(url, path)
     elif url.endswith("/_weights"):
         download_safetensors_tarball(url, path)
@@ -193,9 +204,27 @@ def download_safetensors(url: str, path: Path):
 def make_download_url(url: str, hf_api_token: str | None = None, civitai_api_token: str | None = None) -> str:
     if url.startswith("data:"):
         return url
-    if m := re.match(r"^(?:https?://)?huggingface\.co/([^/]+)/([^/]+)/?$", url):
-        owner, model_name = m.groups()
-        return make_huggingface_download_url(owner, model_name)
+    if m := re.match(r"^(?:https?://)?huggingface\.co/([^/]+)/([^/]+)(?:/([^/]+\.safetensors))?/?$", url):
+        if len(m.groups()) != 3 or not m.groups()[2]:
+            raise ValueError("Invalid HuggingFace URL. Expected format: huggingface.co/<owner>/<model-name>/<lora-weights-file>")
+
+        owner, model_name, lora_weights = m.groups()
+        # Use HuggingFace Hub download directly instead of constructing URL
+        if hf_api_token is not None:
+            # Find and download the first safetensors file
+            try:
+                safetensors_path = hf_hub_download(
+                    repo_id=f"{owner}/{model_name}",
+                    filename=lora_weights,
+                    token=hf_api_token.get_secret_value()
+                )
+                # Return the local path as a data URL to bypass normal download
+                print(f"Downloaded {lora_weights} from HuggingFace to {safetensors_path}")
+                return f"file://{safetensors_path}"
+            except Exception as e:
+                raise ValueError(f"Failed to download from HuggingFace: {e}")
+        else:
+            return make_huggingface_download_url(owner, model_name)
     if m := re.match(r"^(?:https?://)?civitai\.com/models/(\d+)(?:/[^/?]+)?/?$", url):
         model_id = m.groups()[0]
         return make_civitai_download_url(model_id, civitai_api_token)
@@ -203,6 +232,8 @@ def make_download_url(url: str, hf_api_token: str | None = None, civitai_api_tok
         return url
     if m := re.match(r"^(https?://.*\.safetensors)(?:\?|$)", url):
         return url # might be signed, keep the whole url
+    if m := re.match(r"^(https?://.*\.safetensors\?.*)$", url):
+        return url # URL with query parameters, keep the whole url
     if m := re.match(r"^(?:https?://replicate.com/)?([^/]+)/([^/]+)/?$", url):
         owner, model_name = m.groups()
         return make_replicate_model_download_url(owner, model_name)
