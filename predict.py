@@ -528,7 +528,7 @@ class DevLoraPredictor(Predictor):
         disable_safety_checker: bool = Inputs.disable_safety_checker,
         go_fast: bool = Inputs.go_fast_with_default(True),
         lora_weights: str  = Input(
-            description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet. For example, 'fofr/flux-pixar-cars'. Civit Loras may require a Civitai API token, which you can provide in the civitai_api_token input.",
+            description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>/<lora-weights-file.safetensors>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet, including signed URLs. For example, 'fofr/flux-pixar-cars'. Civit AI and HuggingFace LoRAs may require an API token to access, which you can provide in the `civitai_api_token` and `hf_api_token` inputs respectively.",
             default=None,
         ),
         lora_scale: float = Inputs.lora_scale,
