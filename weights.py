@@ -282,8 +282,6 @@ def make_download_url(url: str, civitai_api_token: str | None = None) -> str:
         return make_civitai_download_url(model_id, civitai_api_token)
     if m := re.match(r"^((?:https?://)?civitai\.com/api/download/models/.*)$", url):
         return url
-    if m := re.match(r"^(https?://.*\.safetensors)(?:\?|$)", url):
-        return url  # might be signed, keep the whole url
     if m := re.match(r"^(https?://.*\.safetensors\?.*)$", url):
         return url  # URL with query parameters, keep the whole url
     if m := re.match(r"^(?:https?://replicate.com/)?([^/]+)/([^/]+)/?$", url):
