@@ -76,7 +76,6 @@ class WeightsDownloadCache:
         short_hash = hashed_url[:16]  # Use the first 16 characters of the hash
         return self.base_dir / short_hash
 
-
 def download_weights(url: str, path: Path, hf_api_token: str | None = None, civitai_api_token: str | None = None):
     # If we have a HuggingFace API token, use it to login
     if hf_api_token is not None and "huggingface.co" in url:
@@ -206,25 +205,22 @@ def make_download_url(url: str, hf_api_token: str | None = None, civitai_api_tok
         return url
     if m := re.match(r"^(?:https?://)?huggingface\.co/([^/]+)/([^/]+)(?:/([^/]+\.safetensors))?/?$", url):
         if len(m.groups()) != 3 or not m.groups()[2]:
-            raise ValueError("Invalid HuggingFace URL. Expected format: huggingface.co/<owner>/<model-name>/<lora-weights-file>")
+            raise ValueError("Invalid HuggingFace URL. Expected format: huggingface.co/<owner>/<model-name>/<lora-weights-file.safetensors>")
 
         owner, model_name, lora_weights = m.groups()
-        # Use HuggingFace Hub download directly instead of constructing URL
-        if hf_api_token is not None:
-            # Find and download the first safetensors file
-            try:
-                safetensors_path = hf_hub_download(
-                    repo_id=f"{owner}/{model_name}",
-                    filename=lora_weights,
-                    token=hf_api_token.get_secret_value()
-                )
-                # Return the local path as a data URL to bypass normal download
-                print(f"Downloaded {lora_weights} from HuggingFace to {safetensors_path}")
-                return f"file://{safetensors_path}"
-            except Exception as e:
-                raise ValueError(f"Failed to download from HuggingFace: {e}")
-        else:
-            return make_huggingface_download_url(owner, model_name)
+        # Use HuggingFace Hub download directly
+        try:
+            token_value = hf_api_token.get_secret_value() if hf_api_token is not None else None
+            safetensors_path = hf_hub_download(
+                repo_id=f"{owner}/{model_name}",
+                filename=lora_weights,
+                token=token_value
+            )
+            # Return the local path as a data URL to bypass normal download
+            print(f"Downloaded {lora_weights} from HuggingFace to {safetensors_path}")
+            return f"file://{safetensors_path}"
+        except Exception as e:
+            raise ValueError(f"Failed to download from HuggingFace: {e}")
     if m := re.match(r"^(?:https?://)?civitai\.com/models/(\d+)(?:/[^/?]+)?/?$", url):
         model_id = m.groups()[0]
         return make_civitai_download_url(model_id, civitai_api_token)
@@ -270,25 +266,6 @@ def make_replicate_version_download_url(
     owner: str, model_name: str, version_id: str
 ) -> str:
     return f"https://replicate.com/{owner}/{model_name}/versions/{version_id}/_weights"
-
-
-def make_huggingface_download_url(owner: str, model_name: str) -> str:
-    url = f"https://huggingface.co/api/models/{owner}/{model_name}/tree/main"
-    response = requests.get(url)
-    response.raise_for_status()
-
-    files = response.json()
-    safetensors_files = [f for f in files if f["path"].endswith(".safetensors")]
-
-    if len(safetensors_files) == 0:
-        raise ValueError("No .safetensors file found in the repository")
-    if len(safetensors_files) > 1:
-        raise ValueError("Multiple .safetensors files found in the repository")
-
-    safetensors_path = safetensors_files[0]["path"]
-    return (
-        f"https://huggingface.co/{owner}/{model_name}/resolve/main/{safetensors_path}"
-    )
 
 
 def make_civitai_download_url(model_id: str, civitai_api_token: str | None = None) -> str:
