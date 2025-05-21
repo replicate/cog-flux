@@ -142,7 +142,7 @@ def download_weights_url(url: str, path: Path, hf_api_token: str | None = None):
                     files = HfApi().list_repo_files(repo_id)
                     sft_files = [file for file in files if ".safetensors" in file]
                     if len(sft_files) == 1:
-                        hf_hub_download(repo_id=repo_id, filename=sft_files[0])
+                        lora_weights = sft_files[0]
                     else:
                         raise ValueError(
                             f"No *.safetensors file was explicitly specified from the HuggingFace repo {repo_id} and more than one *.safetensors file was found. Found: {[sft_file for sft_file in sft_files]}"
@@ -151,7 +151,6 @@ def download_weights_url(url: str, path: Path, hf_api_token: str | None = None):
                 safetensors_path = hf_hub_download(
                     repo_id=f"{owner}/{model_name}",
                     filename=lora_weights,
-                    # token=hf_api_token.get_secret_value() if hf_api_token is not None else None,
                 )
                 # Copy the downloaded file to the desired path
                 shutil.copy(Path(safetensors_path), path)
@@ -265,7 +264,7 @@ def download_safetensors(url: str, path: Path):
         raise RuntimeError(f"Failed to download safetensors file: {e}")
 
 
-def make_download_url(url: str, civitai_api_token: str | None = None) -> str:
+def make_download_url(url: str, civitai_api_token: Secret | None = None) -> str:
     if url.startswith("data:"):
         return url
     if m := re.match(
