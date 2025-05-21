@@ -138,14 +138,14 @@ def download_weights_url(url: str, path: Path, hf_api_token: str | None = None):
         try:
             with logged_in_to_huggingface(hf_api_token):
                 if lora_weights is None:
-                    api = HfApi()
-                    files = api.list_repo_files(repo_id)
+                    repo_id = f"{owner}/{model_name}"
+                    files = HfApi().list_repo_files(repo_id)
                     sft_files = [file for file in files if ".safetensors" in file]
                     if len(sft_files) == 1:
                         hf_hub_download(repo_id=repo_id, filename=sft_files[0])
                     else:
                         raise ValueError(
-                            f"No *.safetensors file was explicitly specified from the HuggingFace repo {repo_id} and more than one *.safetensors file was found. Found: {[stf_file for sft_file in sft_files]}"
+                            f"No *.safetensors file was explicitly specified from the HuggingFace repo {repo_id} and more than one *.safetensors file was found. Found: {[sft_file for sft_file in sft_files]}"
                         )
 
                 safetensors_path = hf_hub_download(
