@@ -563,7 +563,7 @@ class DevLoraPredictor(Predictor):
             extra_lora,
             extra_lora_scale,
             hf_api_token=hf_api_token,
-            civitai_api_token=civitai_api_token
+            civitai_api_token=civitai_api_token,
         )
 
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
