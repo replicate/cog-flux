@@ -527,7 +527,7 @@ class DevLoraPredictor(Predictor):
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
         go_fast: bool = Inputs.go_fast_with_default(True),
-        lora_weights: str  = Input(
+        lora_weights: str = Input(
             description="Load LoRA weights. Supports Replicate models in the format <owner>/<username> or <owner>/<username>/<version>, HuggingFace URLs in the format huggingface.co/<owner>/<model-name>/<lora-weights-file.safetensors>, CivitAI URLs in the format civitai.com/models/<id>[/<model-name>], or arbitrary .safetensors URLs from the Internet, including signed URLs. For example, 'fofr/flux-pixar-cars'. Civit AI and HuggingFace LoRAs may require an API token to access, which you can provide in the `civitai_api_token` and `hf_api_token` inputs respectively.",
             default=None,
         ),
@@ -557,7 +557,14 @@ class DevLoraPredictor(Predictor):
             go_fast = False
 
         model = self.fp8_model if go_fast else self.bf16_model
-        model.handle_loras(lora_weights, lora_scale, extra_lora, extra_lora_scale, hf_api_token=hf_api_token, civitai_api_token=civitai_api_token)
+        model.handle_loras(
+            lora_weights,
+            lora_scale,
+            extra_lora,
+            extra_lora_scale,
+            hf_api_token=hf_api_token,
+            civitai_api_token=civitai_api_token
+        )
 
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         imgs, np_imgs = model.predict(
