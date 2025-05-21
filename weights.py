@@ -11,8 +11,6 @@ from collections import deque
 from io import BytesIO
 from pathlib import Path
 
-import requests
-import huggingface_hub
 from huggingface_hub import hf_hub_download, login
 
 DEFAULT_CACHE_BASE_DIR = Path("/src/weights-cache")
@@ -82,7 +80,7 @@ def download_weights(url: str, path: Path, hf_api_token: str | None = None, civi
         print("Attemptig to login to HuggingFace using provided token...")
         login(token=hf_api_token.get_secret_value())
         print("Login to HuggingFace successful!")
-        
+
     download_url = make_download_url(url, hf_api_token=hf_api_token, civitai_api_token=civitai_api_token)
     download_weights_url(download_url, path)
 
