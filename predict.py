@@ -560,7 +560,9 @@ class DevLoraPredictor(Predictor):
         # Ignore extra_lora if it is the same as lora_weights
         if extra_lora is not None and lora_weights is not None:
             if extra_lora.strip() == lora_weights.strip():
-                print(f"Warning: extra_lora '{extra_lora}' is the same as lora_weights. Ignoring extra_lora.")
+                print(
+                    f"Warning: extra_lora '{extra_lora}' is the same as lora_weights. Ignoring extra_lora."
+                )
                 extra_lora = None
 
         model.handle_loras(
