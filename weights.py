@@ -296,7 +296,7 @@ def make_download_url(url: str, civitai_api_token: Secret | None = None) -> str:
 
     if "huggingface.co" in url:
         raise ValueError(
-            "Failed to parse HuggingFace URL. Expected huggingface.co/<owner>/<model-name>"
+            "Failed to parse HuggingFace URL. Expected huggingface.co/<owner>/<model-name>[/<lora-weights-file.safetensors>]"
         )
     if "civitai.com" in url:
         raise ValueError(
@@ -305,7 +305,7 @@ def make_download_url(url: str, civitai_api_token: Secret | None = None) -> str:
     raise ValueError(
         """Failed to parse URL. Expected either:
 * Replicate model in the format <owner>/<username> or <owner>/<username>/<version>
-* HuggingFace URL in the format huggingface.co/<owner>/<model-name>
+* HuggingFace URL in the format huggingface.co/<owner>/<model-name>[/<lora-weights-file.safetensors>]
 * CivitAI URL in the format civitai.com/models/<id>[/<model-name>]
 * Arbitrary .safetensors URLs from the Internet"""
     )
