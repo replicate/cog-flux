@@ -116,8 +116,6 @@ predict:
     fixed_inputs:
       lora_weights: fofr/flux-90s-power-rangers
       extra_lora: fofr/flux-80s-cyberpunk
-      hf_api_token: None
-      civitai_api_key: None
     iterations: 10
     prompt: |
       For the extra_lora input, here is a list of loras you can use:

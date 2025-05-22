@@ -557,6 +557,12 @@ class DevLoraPredictor(Predictor):
             go_fast = False
 
         model = self.fp8_model if go_fast else self.bf16_model
+        # Ignore extra_lora if it is the same as lora_weights
+        if extra_lora is not None and lora_weights is not None:
+            if extra_lora.strip() == lora_weights.strip():
+                print(f"Warning: extra_lora '{extra_lora}' is the same as lora_weights. Ignoring extra_lora.")
+                extra_lora = None
+
         model.handle_loras(
             lora_weights,
             lora_scale,
