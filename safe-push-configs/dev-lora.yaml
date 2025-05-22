@@ -117,3 +117,12 @@ predict:
       lora_weights: fofr/flux-90s-power-rangers
       extra_lora: fofr/flux-80s-cyberpunk
     iterations: 10
+    prompt: |
+      For the extra_lora input, here is a list of loras you can use:
+      * fofr/flux-handwriting
+      * fofr/flux-my-subconscious
+      * aramintak/flux-softserve-anime
+      * davisbrown/flux-half-illustration
+      * andreasjansson/flux-shapes
+      * https://civitai.com/api/download/models/735262
+      * huggingface.co/multimodalart/flux-tarot-v1
