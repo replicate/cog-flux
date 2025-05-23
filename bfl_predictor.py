@@ -66,6 +66,8 @@ class LoraMixin:
         lora_scale: float = 1.0,
         extra_lora_weights: str | None = None,
         extra_lora_scale: float = 1.0,
+        hf_api_token: str | None = None,
+        civitai_api_token: str | None = None,
     ):
         loading = "loading"
         if not lora_weights and extra_lora_weights:
@@ -95,9 +97,17 @@ class LoraMixin:
             ):
                 if self.lora or self.extra_lora:
                     unload_loras(model)
-                lora_path = self.weights_cache.ensure(lora_weights)
+                lora_path = self.weights_cache.ensure(
+                    lora_weights,
+                    hf_api_token=hf_api_token,
+                    civitai_api_token=civitai_api_token,
+                )
                 if extra_lora_weights:
-                    extra_lora_path = self.weights_cache.ensure(extra_lora_weights)
+                    extra_lora_path = self.weights_cache.ensure(
+                        extra_lora_weights,
+                        hf_api_token=hf_api_token,
+                        civitai_api_token=civitai_api_token,
+                    )
                     load_loras(
                         model,
                         [lora_path, extra_lora_path],

@@ -10,8 +10,10 @@ import time
 from collections import deque
 from io import BytesIO
 from pathlib import Path
+from contextlib import contextmanager
 
-import requests
+from cog import Secret
+from huggingface_hub import HfApi, hf_hub_download, login, logout
 
 DEFAULT_CACHE_BASE_DIR = Path("/src/weights-cache")
 
@@ -33,7 +35,12 @@ class WeightsDownloadCache:
         self.lru_paths = deque()
         base_dir.mkdir(parents=True, exist_ok=True)
 
-    def ensure(self, url: str) -> Path:
+    def ensure(
+        self,
+        url: str,
+        hf_api_token: Secret | None = None,
+        civitai_api_token: Secret | None = None,
+    ) -> Path:
         path = self._weights_path(url)
 
         if path in self.lru_paths:
@@ -48,7 +55,12 @@ class WeightsDownloadCache:
             while not self._has_enough_space() and len(self.lru_paths) > 0:
                 self._remove_least_recent()
 
-            download_weights(url, path)
+            download_weights(
+                url,
+                path,
+                hf_api_token=hf_api_token,
+                civitai_api_token=civitai_api_token,
+            )
 
         self.lru_paths.append(path)  # Add file to end of cache
         return path
@@ -75,22 +87,85 @@ class WeightsDownloadCache:
         return self.base_dir / short_hash
 
 
-def download_weights(url: str, path: Path):
-    download_url = make_download_url(url)
-    download_weights_url(download_url, path)
+def download_weights(
+    url: str,
+    path: Path,
+    hf_api_token: str | None = None,
+    civitai_api_token: str | None = None,
+):
+    download_url = make_download_url(url, civitai_api_token=civitai_api_token)
+    download_weights_url(download_url, path, hf_api_token=hf_api_token)
 
 
-def download_weights_url(url: str, path: Path):
+@contextmanager
+def logged_in_to_huggingface(
+    token: Secret | None = None, add_to_git_credential: bool = False
+):
+    """Context manager for temporary Hugging Face login."""
+    try:
+        if token is not None:
+            print("Attemptig to login to HuggingFace using provided token...")
+            # Log in at the start of the context
+            login(
+                token=token.get_secret_value(),
+                add_to_git_credential=add_to_git_credential,
+            )
+            print("Login to HuggingFace successful!")
+        yield
+    finally:
+        # Always log out at the end, even if an exception occurs
+        logout()
+        print("Logged out of HuggingFace.")
+
+
+def download_weights_url(url: str, path: Path, hf_api_token: str | None = None):
     path = Path(path)
 
     print("Downloading weights")
     start_time = time.time()
 
-    if url.startswith("data:"):
+    if m := re.match(
+        r"^(?:https?://)?huggingface\.co/([^/]+)/([^/]+)(?:/([^/]+\.safetensors))?/?$",
+        url,
+    ):
+        if len(m.groups()) == 2:
+            owner, model_name = m.groups()
+            lora_weights = None
+        else:
+            owner, model_name, lora_weights = m.groups()
+
+        # Use HuggingFace Hub download directly
+        try:
+            with logged_in_to_huggingface(hf_api_token):
+                if lora_weights is None:
+                    repo_id = f"{owner}/{model_name}"
+                    files = HfApi().list_repo_files(repo_id)
+                    sft_files = [file for file in files if ".safetensors" in file]
+                    if len(sft_files) == 1:
+                        lora_weights = sft_files[0]
+                    else:
+                        raise ValueError(
+                            f"No *.safetensors file was explicitly specified from the HuggingFace repo {repo_id} and more than one *.safetensors file was found. Found: {[sft_file for sft_file in sft_files]}"
+                        )
+
+                safetensors_path = hf_hub_download(
+                    repo_id=f"{owner}/{model_name}",
+                    filename=lora_weights,
+                )
+                # Copy the downloaded file to the desired path
+                shutil.copy(Path(safetensors_path), path)
+                print(f"Downloaded {lora_weights} from HuggingFace to {path}")
+        except Exception as e:
+            raise ValueError(f"Failed to download from HuggingFace: {e}")
+    elif url.startswith("data:"):
         download_data_url(url, path)
     elif url.endswith(".tar"):
         download_safetensors_tarball(url, path)
-    elif url.endswith(".safetensors") or "://civitai.com/api/download" in url:
+    elif (
+        url.endswith(".safetensors")
+        or "://civitai.com/api/download" in url
+        or ".safetensors?" in url
+    ):
         download_safetensors(url, path)
     elif url.endswith("/_weights"):
         download_safetensors_tarball(url, path)
@@ -189,19 +264,25 @@ def download_safetensors(url: str, path: Path):
         raise RuntimeError(f"Failed to download safetensors file: {e}")
 
 
-def make_download_url(url: str) -> str:
+def make_download_url(url: str, civitai_api_token: Secret | None = None) -> str:
     if url.startswith("data:"):
         return url
-    if m := re.match(r"^(?:https?://)?huggingface\.co/([^/]+)/([^/]+)/?$", url):
-        owner, model_name = m.groups()
-        return make_huggingface_download_url(owner, model_name)
+    if m := re.match(
+        r"^(?:https?://)?huggingface\.co/([^/]+)/([^/]+)(?:/([^/]+\.safetensors))?/?$",
+        url,
+    ):
+        if len(m.groups()) not in [2, 3]:
+            raise ValueError(
+                "Invalid HuggingFace URL. Expected format: huggingface.co/<owner>/<model-name>[/<lora-weights-file.safetensors>]"
+            )
+        return url
     if m := re.match(r"^(?:https?://)?civitai\.com/models/(\d+)(?:/[^/?]+)?/?$", url):
         model_id = m.groups()[0]
-        return make_civitai_download_url(model_id)
+        return make_civitai_download_url(model_id, civitai_api_token)
     if m := re.match(r"^((?:https?://)?civitai\.com/api/download/models/.*)$", url):
         return url
-    if m := re.match(r"^(https?://.*\.safetensors)(?:\?|$)", url):
-        return m.groups()[0]
+    if m := re.match(r"^(https?://.*\.safetensors(\?.*)?)$", url):
+        return url  # URL with query parameters, keep the whole url
     if m := re.match(r"^(?:https?://replicate.com/)?([^/]+)/([^/]+)/?$", url):
         owner, model_name = m.groups()
         return make_replicate_model_download_url(owner, model_name)
@@ -215,7 +296,7 @@ def make_download_url(url: str) -> str:
 
     if "huggingface.co" in url:
         raise ValueError(
-            "Failed to parse HuggingFace URL. Expected huggingface.co/<owner>/<model-name>"
+            "Failed to parse HuggingFace URL. Expected huggingface.co/<owner>/<model-name>[/<lora-weights-file.safetensors>]"
         )
     if "civitai.com" in url:
         raise ValueError(
@@ -224,7 +305,7 @@ def make_download_url(url: str) -> str:
     raise ValueError(
         """Failed to parse URL. Expected either:
 * Replicate model in the format <owner>/<username> or <owner>/<username>/<version>
-* HuggingFace URL in the format huggingface.co/<owner>/<model-name>
+* HuggingFace URL in the format huggingface.co/<owner>/<model-name>[/<lora-weights-file.safetensors>]
 * CivitAI URL in the format civitai.com/models/<id>[/<model-name>]
 * Arbitrary .safetensors URLs from the Internet"""
     )
@@ -240,27 +321,9 @@ def make_replicate_version_download_url(
     return f"https://replicate.com/{owner}/{model_name}/versions/{version_id}/_weights"
 
 
-def make_huggingface_download_url(owner: str, model_name: str) -> str:
-    url = f"https://huggingface.co/api/models/{owner}/{model_name}/tree/main"
-    response = requests.get(url)
-    response.raise_for_status()
-
-    files = response.json()
-    safetensors_files = [f for f in files if f["path"].endswith(".safetensors")]
-
-    if len(safetensors_files) == 0:
-        raise ValueError("No .safetensors file found in the repository")
-    if len(safetensors_files) > 1:
-        raise ValueError("Multiple .safetensors files found in the repository")
-
-    safetensors_path = safetensors_files[0]["path"]
-    return (
-        f"https://huggingface.co/{owner}/{model_name}/resolve/main/{safetensors_path}"
-    )
-
-
-def make_civitai_download_url(model_id: str) -> str:
-    civit_api_key = os.getenv("CIVITAI_API_KEY")
-    if civit_api_key is None:
+def make_civitai_download_url(
+    model_id: str, civitai_api_token: str | None = None
+) -> str:
+    if civitai_api_token is None:
         return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor"
-    return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token={civit_api_key}"
+    return f"https://civitai.com/api/download/models/{model_id}?type=Model&format=SafeTensor&token={civitai_api_token.get_secret_value()}"
