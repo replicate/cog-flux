@@ -4,7 +4,7 @@
 build:
   # set to true if your model requires a GPU
   gpu: true
-  cuda: "12.4"
+  cuda: "12.6"
 
   python_version: "3.11"
 
@@ -23,8 +23,9 @@ build:
     - "pybase64==1.4.0"
     - "pydash==8.0.3"
     - "opencv-python-headless==4.10.0.84"
-    - "torch==2.6.0"
-    - "torchvision==0.21"
+    - "torch==2.7.0"
+    - "torchvision==0.22"
+    - "redis==6.0.0"
 
 
   # commands run after the environment is setup
