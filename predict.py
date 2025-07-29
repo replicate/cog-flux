@@ -1010,7 +1010,9 @@ class DepthDevPredictor(Predictor):
 class FluxKreaDevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup()
-        self.bf16_model = BflBf16Predictor("flux-krea-dev", offload=self.should_offload())
+        self.bf16_model = BflBf16Predictor(
+            "flux-krea-dev", offload=self.should_offload()
+        )
         self.fp8_model = BflFp8Flux(
             "flux-krea-dev-fp8",
             loaded_models=self.bf16_model.get_shared_models(),
