@@ -46,6 +46,8 @@ REDUX_URL = "https://weights.replicate.delivery/default/black-forest-labs/ctrl-n
 REDUX_CACHE = "./model-cache/redux/flux1-redux-dev.safetensors"
 DEPTH_URL = "https://weights.replicate.delivery/default/liheyoung/depth-anything-large/flux-depth-model.tar"
 DEPTH_CACHE = "./model-cache/depth"
+KREA_DEV_CACHE = "./model-cache/krea-dev/krea-dev.safetensors"
+KREA_DEV_URL = None  # Local testing only
 
 configs = {
     "flux-dev": ModelSpec(
@@ -208,6 +210,38 @@ configs = {
             shift_factor=0.1159,
         ),
     ),
+    "flux-krea-dev": ModelSpec(
+        ckpt_path=KREA_DEV_CACHE,
+        ckpt_url=KREA_DEV_URL,
+        params=FluxParams(
+            in_channels=64,
+            out_channels=64,
+            vec_in_dim=768,
+            context_in_dim=4096,
+            hidden_size=3072,
+            mlp_ratio=4.0,
+            num_heads=24,
+            depth=19,
+            depth_single_blocks=38,
+            axes_dim=[16, 56, 56],
+            theta=10_000,
+            qkv_bias=True,
+            guidance_embed=True,
+        ),
+        ae_path=AE_CACHE,
+        ae_url=AE_URL,
+        ae_params=AutoEncoderParams(
+            resolution=256,
+            in_channels=3,
+            ch=128,
+            out_ch=3,
+            ch_mult=[1, 2, 4, 4],
+            num_res_blocks=2,
+            z_channels=16,
+            scale_factor=0.3611,
+            shift_factor=0.1159,
+        ),
+    ),
 }
 
 
@@ -247,6 +281,12 @@ def load_flow_model(name: str, device: str | torch.device = "cuda", quantize: bo
         sd = load_sft(ckpt_path, device=str(device))
         missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
         print_load_warning(missing, unexpected)
+    
+    # Force convert Krea model parameters to BF16 after loading weights (for mixed precision compatibility)
+    if "krea" in name.lower():
+        print("Applying BF16 conversion for Krea model compatibility")
+        model = model.to(torch.bfloat16)
+    
     return model
 
 

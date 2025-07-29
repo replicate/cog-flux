@@ -28,6 +28,8 @@ from loguru import logger
 class ModelVersion(StrEnum):
     flux_dev = "flux-dev"
     flux_schnell = "flux-schnell"
+    flux_krea_dev = "flux-krea-dev"
+    flux_krea_dev_fp8 = "flux-krea-dev-fp8"
 
 
 class QuantizationDtype(StrEnum):
