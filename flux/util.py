@@ -47,7 +47,7 @@ REDUX_CACHE = "./model-cache/redux/flux1-redux-dev.safetensors"
 DEPTH_URL = "https://weights.replicate.delivery/default/liheyoung/depth-anything-large/flux-depth-model.tar"
 DEPTH_CACHE = "./model-cache/depth"
 KREA_DEV_CACHE = "./model-cache/krea-dev/krea-dev.safetensors"
-KREA_DEV_URL = None  # Local testing only
+KREA_DEV_URL = "https://weights.replicate.delivery/default/krea/flux-krea-dev/krea-dev.safetensors"
 
 configs = {
     "flux-dev": ModelSpec(
