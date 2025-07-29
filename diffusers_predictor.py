@@ -23,9 +23,13 @@ MODEL_URL_DEV = (
     "https://weights.replicate.delivery/default/black-forest-labs/FLUX.1-dev/files.tar"
 )
 MODEL_URL_SCHNELL = "https://weights.replicate.delivery/default/black-forest-labs/FLUX.1-schnell/slim.tar"
+MODEL_URL_KREA_DEV = (
+    "https://weights.replicate.delivery/default/black-forest-labs/FLUX.1-krea-dev/files.tar"
+)
 
 FLUX_DEV_PATH = "./model-cache/FLUX.1-dev"
 FLUX_SCHNELL_PATH = "./model-cache/FLUX.1-schnell"
+FLUX_KREA_DEV_PATH = "./model-cache/FLUX.1-krea-dev"
 MODEL_CACHE = "./model-cache/"
 
 MAX_IMAGE_SIZE = 1440
@@ -45,6 +49,7 @@ CONFIGS = {
         MODEL_URL_SCHNELL, FLUX_SCHNELL_PATH, FLUX_SCHNELL_PATH, 4, 256
     ),
     "flux-dev": FluxConfig(MODEL_URL_DEV, FLUX_DEV_PATH, MODEL_CACHE, 28, 512),
+    "flux-krea-dev": FluxConfig(MODEL_URL_KREA_DEV, FLUX_KREA_DEV_PATH, MODEL_CACHE, 28, 512),
 }
 
 # Suppress diffusers nsfw warnings

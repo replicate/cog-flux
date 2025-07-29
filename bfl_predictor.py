@@ -36,6 +36,7 @@ from weights import WeightsDownloadCache
 
 FLUX_DEV = "flux-dev"
 FLUX_SCHNELL = "flux-schnell"
+FLUX_KREA_DEV = "flux-krea-dev"
 
 
 class LoraMixin:

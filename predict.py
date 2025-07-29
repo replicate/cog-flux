@@ -1007,6 +1007,70 @@ class DepthDevPredictor(Predictor):
         )
 
 
+class FluxKreaDevPredictor(Predictor):
+    def setup(self) -> None:
+        self.base_setup()
+        self.bf16_model = BflBf16Predictor("flux-krea-dev", offload=self.should_offload())
+        self.fp8_model = BflFp8Flux(
+            "flux-krea-dev-fp8",
+            loaded_models=self.bf16_model.get_shared_models(),
+            torch_compile=True,
+            compilation_aspect_ratios=ASPECT_RATIOS,
+            offload=self.should_offload(),
+        )
+
+    def predict(
+        self,
+        prompt: str = Inputs.prompt,
+        aspect_ratio: str = Inputs.aspect_ratio,
+        image: Path = Input(
+            description="Input image for image to image mode. The aspect ratio of your output will match this image",
+            default=None,
+        ),
+        prompt_strength: float = Input(
+            description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            ge=0.0,
+            le=1.0,
+            default=0.80,
+        ),
+        num_outputs: int = Inputs.num_outputs,
+        num_inference_steps: int = Inputs.num_inference_steps_with(
+            le=50, default=28, recommended=(28, 50)
+        ),
+        guidance: float = Inputs.guidance_with(default=3, le=10),
+        seed: int = Inputs.seed,
+        output_format: str = Inputs.output_format,
+        output_quality: int = Inputs.output_quality,
+        disable_safety_checker: bool = Inputs.disable_safety_checker,
+        go_fast: bool = Inputs.go_fast_with_default(True),
+        megapixels: str = Inputs.megapixels,
+    ) -> List[Path]:
+        if image and go_fast:
+            print("img2img not supported with fp8 quantization; running with bf16")
+            go_fast = False
+        width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
+        model = self.fp8_model if go_fast else self.bf16_model
+        imgs, np_imgs = model.predict(
+            prompt,
+            num_outputs,
+            num_inference_steps,
+            guidance=guidance,
+            legacy_image_path=image,
+            prompt_strength=prompt_strength,
+            seed=seed,
+            width=width,
+            height=height,
+        )
+
+        return self.postprocess(
+            imgs,
+            disable_safety_checker,
+            output_format,
+            output_quality,
+            np_images=np_imgs,
+        )
+
+
 def make_multiple_of_16(n):
     # Rounds up to the next multiple of 16, or returns n if already a multiple of 16
     return ((n + 15) // 16) * 16
