@@ -1013,7 +1013,7 @@ class FluxKreaDevPredictor(Predictor):
         self.bf16_model = BflBf16Predictor(
             "flux-krea-dev", offload=self.should_offload()
         )
-        
+
         # Check if A100 - disable FP8 for A100 compatibility
         gpu_name = (
             os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits")
@@ -1021,9 +1021,11 @@ class FluxKreaDevPredictor(Predictor):
             .strip()
         )
         is_a100 = "A100" in gpu_name
-        
+
         if is_a100:
-            print("A100 detected - FP8 quantization disabled for hardware compatibility")
+            print(
+                "A100 detected - FP8 quantization disabled for hardware compatibility"
+            )
             self.fp8_model = None
         else:
             self.fp8_model = BflFp8Flux(
@@ -1065,7 +1067,11 @@ class FluxKreaDevPredictor(Predictor):
             go_fast = False
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
         # Safe model selection - fall back to BF16 if FP8 unavailable
-        model = self.bf16_model if (self.fp8_model is None or not go_fast) else self.fp8_model
+        model = (
+            self.bf16_model
+            if (self.fp8_model is None or not go_fast)
+            else self.fp8_model
+        )
         imgs, np_imgs = model.predict(
             prompt,
             num_outputs,
