@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image
-from typing import List
+from typing import List, Optional
 from cog import BasePredictor, Input, Path, Secret  # type: ignore
 from flux.util import (
     download_weights,
@@ -376,7 +376,7 @@ class DevPredictor(Predictor):
         self,
         prompt: str = Inputs.prompt,
         aspect_ratio: str = Inputs.aspect_ratio,
-        image: Path = Input(
+        image: Optional[Path] = Input(
             description="Input image for image to image mode. The aspect ratio of your output will match this image",
             default=None,
         ),
@@ -391,7 +391,7 @@ class DevPredictor(Predictor):
             le=50, default=28, recommended=(28, 50)
         ),
         guidance: float = Inputs.guidance_with(default=3, le=10),
-        seed: int = Inputs.seed,
+        seed: Optional[int] = Inputs.seed,
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
@@ -1038,7 +1038,7 @@ class FluxKreaDevPredictor(Predictor):
         self,
         prompt: str = Inputs.prompt,
         aspect_ratio: str = Inputs.aspect_ratio,
-        image: Path = Input(
+        image: Optional[Path] = Input(
             description="Input image for image to image mode. The aspect ratio of your output will match this image",
             default=None,
         ),
@@ -1053,7 +1053,7 @@ class FluxKreaDevPredictor(Predictor):
             le=50, default=28, recommended=(28, 50)
         ),
         guidance: float = Inputs.guidance_with(default=3, le=10),
-        seed: int = Inputs.seed,
+        seed: Optional[int] = Inputs.seed,
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
