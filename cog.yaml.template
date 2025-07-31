@@ -4,7 +4,7 @@
 build:
   # set to true if your model requires a GPU
   gpu: true
-  cog_runtime: true
+  # cog_runtime: true
   cuda: "12.6"
 
   python_version: "3.11"
