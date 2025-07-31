@@ -15,6 +15,8 @@ from diffusers_predictor import DiffusersFlux
 from flux.modules.conditioner import PreLoadedHFEmbedder
 from fp8.util import LoadedModels
 
+
+
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -33,6 +35,7 @@ from flux.util import (
     download_weights,
     load_ae,
 )
+from helpers import record_billing_metric
 
 from diffusers.pipelines.stable_diffusion.safety_checker import (
     StableDiffusionSafetyChecker,
@@ -1083,6 +1086,8 @@ class FluxKreaDevPredictor(Predictor):
             width=width,
             height=height,
         )
+
+        record_billing_metric("image_output_count", num_outputs)
 
         return self.postprocess(
             imgs,
