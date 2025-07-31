@@ -29,6 +29,7 @@ build:
     - "redis==6.0.0"
     - "pydantic"
     - "python-dotenv"
+    - "httpx"
 
 
   # commands run after the environment is setup
