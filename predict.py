@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image
-from typing import List
+from typing import List, Optional
 from cog import BasePredictor, Input, Path, Secret  # type: ignore
 from flux.util import (
     download_weights,
@@ -376,7 +376,7 @@ class DevPredictor(Predictor):
         self,
         prompt: str = Inputs.prompt,
         aspect_ratio: str = Inputs.aspect_ratio,
-        image: Path = Input(
+        image: Optional[Path] = Input(
             description="Input image for image to image mode. The aspect ratio of your output will match this image",
             default=None,
         ),
@@ -391,7 +391,7 @@ class DevPredictor(Predictor):
             le=50, default=28, recommended=(28, 50)
         ),
         guidance: float = Inputs.guidance_with(default=3, le=10),
-        seed: int = Inputs.seed,
+        seed: Optional[int] = Inputs.seed,
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
@@ -1010,20 +1010,37 @@ class DepthDevPredictor(Predictor):
 class FluxKreaDevPredictor(Predictor):
     def setup(self) -> None:
         self.base_setup()
-        self.bf16_model = BflBf16Predictor("flux-krea-dev", offload=self.should_offload())
-        self.fp8_model = BflFp8Flux(
-            "flux-krea-dev-fp8",
-            loaded_models=self.bf16_model.get_shared_models(),
-            torch_compile=True,
-            compilation_aspect_ratios=ASPECT_RATIOS,
-            offload=self.should_offload(),
+        self.bf16_model = BflBf16Predictor(
+            "flux-krea-dev", offload=self.should_offload()
         )
+
+        # Check if A100 - disable FP8 for A100 compatibility
+        gpu_name = (
+            os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits")
+            .read()
+            .strip()
+        )
+        is_a100 = "A100" in gpu_name
+
+        if is_a100:
+            print(
+                "A100 detected - FP8 quantization disabled for hardware compatibility"
+            )
+            self.fp8_model = None
+        else:
+            self.fp8_model = BflFp8Flux(
+                "flux-krea-dev-fp8",
+                loaded_models=self.bf16_model.get_shared_models(),
+                torch_compile=True,
+                compilation_aspect_ratios=ASPECT_RATIOS,
+                offload=self.should_offload(),
+            )
 
     def predict(
         self,
         prompt: str = Inputs.prompt,
         aspect_ratio: str = Inputs.aspect_ratio,
-        image: Path = Input(
+        image: Optional[Path] = Input(
             description="Input image for image to image mode. The aspect ratio of your output will match this image",
             default=None,
         ),
@@ -1038,7 +1055,7 @@ class FluxKreaDevPredictor(Predictor):
             le=50, default=28, recommended=(28, 50)
         ),
         guidance: float = Inputs.guidance_with(default=3, le=10),
-        seed: int = Inputs.seed,
+        seed: Optional[int] = Inputs.seed,
         output_format: str = Inputs.output_format,
         output_quality: int = Inputs.output_quality,
         disable_safety_checker: bool = Inputs.disable_safety_checker,
@@ -1049,7 +1066,12 @@ class FluxKreaDevPredictor(Predictor):
             print("img2img not supported with fp8 quantization; running with bf16")
             go_fast = False
         width, height = self.size_from_aspect_megapixels(aspect_ratio, megapixels)
-        model = self.fp8_model if go_fast else self.bf16_model
+        # Safe model selection - fall back to BF16 if FP8 unavailable
+        model = (
+            self.bf16_model
+            if (self.fp8_model is None or not go_fast)
+            else self.fp8_model
+        )
         imgs, np_imgs = model.predict(
             prompt,
             num_outputs,

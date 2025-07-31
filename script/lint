@@ -1,0 +1,9 @@
+#!/bin/bash -eu
+
+if [[ ${1:-} == "--fix" ]]; then
+    ruff check --fix
+    ruff format
+else
+    ruff check
+    ruff format --check
+fi
